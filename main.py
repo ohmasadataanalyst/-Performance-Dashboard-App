@@ -103,9 +103,22 @@ wk_path = st.sidebar.text_input("wkhtmltopdf path:", default_wk)
 df_uploads = pd.read_sql('SELECT id, filename, uploader, timestamp FROM uploads ORDER BY timestamp DESC', conn)
 
 # Scope selection
+df_uploads = pd.read_sql('SELECT id, filename, uploader, timestamp FROM uploads ORDER BY timestamp DESC', conn)
 scope_opts = ['All uploads'] + df_uploads['id'].astype(str).tolist()
 sel = st.sidebar.selectbox("Select upload ID:", scope_opts)
 sel_id = None if sel == 'All uploads' else int(sel)
+
+# Admin: delete submission
+default_del = ['Select ID'] + df_uploads['id'].astype(str).tolist()
+del_choice = st.sidebar.selectbox("🗑️ Delete Submission ID:", default_del)
+if is_admin and del_choice != 'Select ID':
+    del_id = int(del_choice)
+    if st.sidebar.button(f"Confirm Delete #{del_id}"):
+        c.execute('DELETE FROM issues WHERE upload_id=?', (del_id,))
+        c.execute('DELETE FROM uploads WHERE id=?', (del_id,))
+        conn.commit()
+        st.sidebar.success(f"Deleted submission {del_id}")
+        st.experimental_rerun()
 
 # Branch & Category filters
 # Fetch data
