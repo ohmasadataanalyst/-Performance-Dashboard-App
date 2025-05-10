@@ -4,6 +4,7 @@ import plotly.express as px
 import bcrypt
 import sqlite3
 import io
+import shutil
 from datetime import datetime
 
 # Database setup
@@ -89,6 +90,12 @@ if is_admin:
 # Sidebar: upload scope and filters
 st.sidebar.header("🔍 Choose Upload Scope & Filters")
 
+# Configure wkhtmltopdf path
+default_wk = shutil.which('wkhtmltopdf') or ''
+wk_path = st.sidebar.text_input("Path to wkhtmltopdf executable:", default_wk, help="Install wkhtmltopdf and provide its path if not auto-detected.")
+
+# Data loading
+
 df_uploads = pd.read_sql(
     'SELECT id, filename, uploader, file_type, category, timestamp FROM uploads ORDER BY timestamp DESC',
     conn
@@ -100,10 +107,9 @@ scope_options = ['All uploads'] + df_uploads.apply(
 selection = st.sidebar.selectbox("Select upload scope", scope_options)
 sel_id = None if selection.startswith('All') else int(selection.split(' - ')[0])
 
-# Load data
 def load_issues(uid=None):
     sql = 'SELECT issues.*, u.category, u.uploader FROM issues JOIN uploads u ON u.id=issues.upload_id'
-    params = None
+    params = ()
     if uid:
         sql += ' WHERE upload_id=?'
         params = (uid,)
@@ -114,7 +120,6 @@ if df.empty:
     st.warning("No data to display.")
     st.stop()
 
-# Date range filter
 min_d, max_d = df['date'].min().date(), df['date'].max().date()
 start_end = st.sidebar.date_input("Date range", [min_d, max_d])
 if len(start_end) != 2:
@@ -123,66 +128,60 @@ if len(start_end) != 2:
 start_date = datetime.combine(start_end[0], datetime.min.time())
 end_date = datetime.combine(start_end[1], datetime.max.time())
 
-# Category filter
 categories = df['category'].unique().tolist()
 sel_cats = st.sidebar.multiselect("Upload Category", categories, default=categories)
 
-# Filtered df
 mask = (
     (df['date'] >= start_date) & (df['date'] <= end_date) &
     df['category'].isin(sel_cats)
 )
 df_filtered = df.loc[mask]
 
-# Dashboard
+# Dashboard visuals
 st.subheader(f"Issues Summary: {start_end[0]} to {start_end[1]}")
 st.write(f"Total issues in range: {len(df_filtered)}")
 
-# Aggregated summaries and visuals (always shown)
-# Summary by Branch
+# Always show aggregated charts
 b_summary = df_filtered.groupby('branch').size().reset_index(name='total_issues')
 st.plotly_chart(px.bar(b_summary, x='branch', y='total_issues', title='Issues per Branch'), use_container_width=True)
 
-# Summary by Area Manager
 am_summary = df_filtered.groupby('area_manager').size().reset_index(name='total_issues')
 st.plotly_chart(px.pie(am_summary, names='area_manager', values='total_issues', title='Issues by Area Manager'), use_container_width=True)
 
-# Summary by Report Type
 rt_summary = df_filtered.groupby('report_type').size().reset_index(name='total_issues')
 st.plotly_chart(px.bar(rt_summary, x='report_type', y='total_issues', title='Issues by Report Type'), use_container_width=True)
 
-# Summary by Category
 cat_summary = df_filtered.groupby('category').size().reset_index(name='total_issues')
 st.plotly_chart(px.bar(cat_summary, x='category', y='total_issues', title='Issues by Upload Category'), use_container_width=True)
 
-# For single-day selection, also show detailed records
+# Detailed view for single-day
 if (end_date.date() - start_date.date()).days == 0:
     st.subheader("Detailed Records for Selected Day")
     st.dataframe(df_filtered)
 
-# Detailed top issues table
+# Top issues and trend
 st.subheader("Top Issue Descriptions")
 st.dataframe(
     df_filtered['issues']
-    .value_counts()
-    .rename_axis('issue')
-    .reset_index(name='count')
-    .head(20)
+        .value_counts()
+        .rename_axis('issue')
+        .reset_index(name='count')
+        .head(20)
 )
-
-# Trend over time
 trend = df_filtered.groupby(df_filtered['date'].dt.date).size().reset_index(name='count')
 st.plotly_chart(px.line(trend, x='date', y='count', title='Daily Issue Trend'), use_container_width=True)
 
 # Download filtered data
 st.download_button("📥 Download Filtered Data", df_filtered.to_csv(index=False).encode(), "issues_report.csv")
 
-# Download dashboard as PDF
+# PDF generation helper
 def generate_pdf(html_content, filename='dashboard_report.pdf'):
+    if not wk_path:
+        st.error("wkhtmltopdf path not set. Please install wkhtmltopdf and provide its path.")
+        return None
     try:
         import pdfkit
-        path_wk = '/usr/local/bin/wkhtmltopdf'  # adjust if needed
-        config = pdfkit.configuration(wkhtmltopdf=path_wk)
+        config = pdfkit.configuration(wkhtmltopdf=wk_path)
         pdfkit.from_string(html_content, filename, configuration=config)
         with open(filename, 'rb') as f:
             return f.read()
@@ -191,7 +190,6 @@ def generate_pdf(html_content, filename='dashboard_report.pdf'):
         return None
 
 if st.button("📄 Download Dashboard as PDF"):
-    # Build simple HTML report
     html = f"<h1>Performance Dashboard Report</h1>{df_filtered.to_html(index=False)}"
     pdf_data = generate_pdf(html)
     if pdf_data:
