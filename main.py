@@ -75,7 +75,8 @@ def generate_pdf(html, fname='report.pdf', wk_path=None):
 
 # Sidebar: controls
 st.sidebar.header("🔍 Filters & Options")
-# Upload control for admins\if is_admin:
+# Upload control for admins
+if is_admin:
     file_type = st.sidebar.selectbox("File type", ["opening", "closing", "handover", "meal training"])
     category = st.sidebar.selectbox("Category", ['operation-training', 'CCTV', 'complaints', 'missing', 'visits', 'meal training'])
     up = st.sidebar.file_uploader("Upload Excel", type=["xlsx"])
