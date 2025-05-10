@@ -59,6 +59,8 @@ if not is_admin and user not in view_only:
     st.stop()
 
 # PDF generator
+# Added options to preserve color
+
 def generate_pdf(html, fname='report.pdf', wk_path=None):
     if not wk_path:
         st.error("wkhtmltopdf path not set.")
@@ -66,7 +68,12 @@ def generate_pdf(html, fname='report.pdf', wk_path=None):
     try:
         import pdfkit
         config = pdfkit.configuration(wkhtmltopdf=wk_path)
-        pdfkit.from_string(html, fname, configuration=config)
+        options = {
+            'enable-local-file-access': None,
+            'print-media-type': None,
+            'background': None
+        }
+        pdfkit.from_string(html, fname, configuration=config, options=options)
         with open(fname, 'rb') as f:
             return f.read()
     except Exception as e:
@@ -75,25 +82,35 @@ def generate_pdf(html, fname='report.pdf', wk_path=None):
 
 # Sidebar: controls
 st.sidebar.header("🔍 Filters & Options")
+
 # Upload control for admins
 if is_admin:
     file_type = st.sidebar.selectbox("File type", ["opening", "closing", "handover", "meal training"])
     category = st.sidebar.selectbox("Category", ['operation-training', 'CCTV', 'complaints', 'missing', 'visits', 'meal training'])
     up = st.sidebar.file_uploader("Upload Excel", type=["xlsx"])
-    if up:
+    upload_btn = st.sidebar.button("Upload")
+    if up and upload_btn:
         data = up.getvalue()
         ts = datetime.now().isoformat()
-        c.execute('INSERT INTO uploads (filename, uploader, timestamp, file_type, category, file) VALUES (?, ?, ?, ?, ?, ?)',
-                  (up.name, user, ts, file_type, category, sqlite3.Binary(data)))
-        uid = c.lastrowid
-        df_up = pd.read_excel(io.BytesIO(data))
-        df_up.columns = df_up.columns.str.lower()
-        df_up['date'] = pd.to_datetime(df_up['date'], dayfirst=True)
-        for _, row in df_up.iterrows():
-            c.execute('INSERT INTO issues VALUES (?, ?, ?, ?, ?, ?, ?)',
-                      (uid, row['code'], row['issues'], row['branch'], row['area manager'], row['date'].isoformat(), file_type))
-        conn.commit()
-        st.sidebar.success(f"Uploaded {up.name} ({len(df_up)} records)")
+        # Prevent duplicates by checking filename and timestamp
+        c.execute('SELECT COUNT(*) FROM uploads WHERE filename=? AND uploader=? AND file_type=? AND category=?',
+                  (up.name, user, file_type, category))
+        if c.fetchone()[0] == 0:
+            c.execute(
+                'INSERT INTO uploads (filename, uploader, timestamp, file_type, category, file) VALUES (?, ?, ?, ?, ?, ?)',
+                (up.name, user, ts, file_type, category, sqlite3.Binary(data))
+            )
+            uid = c.lastrowid
+            df_up = pd.read_excel(io.BytesIO(data))
+            df_up.columns = df_up.columns.str.lower()
+            df_up['date'] = pd.to_datetime(df_up['date'], dayfirst=True)
+            for _, row in df_up.iterrows():
+                c.execute('INSERT INTO issues VALUES (?, ?, ?, ?, ?, ?, ?)',
+                          (uid, row['code'], row['issues'], row['branch'], row['area manager'], row['date'].isoformat(), file_type))
+            conn.commit()
+            st.sidebar.success(f"Uploaded {up.name} ({len(df_up)} records)")
+        else:
+            st.sidebar.warning("This file has already been uploaded.")
 
 # wkhtmltopdf path
 default_wk = shutil.which('wkhtmltopdf') or ''
@@ -113,12 +130,16 @@ default_del = ['Select ID'] + df_uploads['id'].astype(str).tolist()
 del_choice = st.sidebar.selectbox("🗑️ Delete Submission ID:", default_del)
 if is_admin and del_choice != 'Select ID':
     del_id = int(del_choice)
-    if st.sidebar.button(f"Confirm Delete #{del_id}"):
+    if st.sidebar.button(f"Confirm Delete #{del_id}", key=f"del_{del_id}"):
         c.execute('DELETE FROM issues WHERE upload_id=?', (del_id,))
         c.execute('DELETE FROM uploads WHERE id=?', (del_id,))
         conn.commit()
         st.sidebar.success(f"Deleted submission {del_id}")
-        st.experimental_rerun()
+        # Safely rerun without crashing
+        try:
+            st.experimental_rerun()
+        except AttributeError:
+            pass
 
 # Branch & Category filters
 # Fetch data
@@ -172,7 +193,7 @@ st.subheader("Top Issues")
 st.dataframe(df_f['issues'].value_counts().head(20).rename_axis('issue').reset_index(name='count'))
 
 figs['Trend'] = px.line(df_f.groupby(df_f['date'].dt.date).size().reset_index(name='count'), x='date', y='count', title='Trend')
-    
+
 st.plotly_chart(figs['Trend'], use_container_width=True)
 
 # Downloads
