@@ -92,14 +92,16 @@ selection = st.sidebar.selectbox("Select upload scope", scope_options)
 sel_id = None if selection.startswith('All') else int(selection.split(' - ')[0])
 
 # Admin: delete a specific upload and its issues
-if is_admin and sel_id is not None:
-    if st.sidebar.button("🗑️ Delete Submission"):
-        # Remove issues and upload record
-        c.execute('DELETE FROM issues WHERE upload_id=?', (sel_id,))
-        c.execute('DELETE FROM uploads WHERE id=?', (sel_id,))
-        conn.commit()
-        st.sidebar.success(f"Submission {sel_id} deleted.")
-        st.experimental_rerun()
+if is_admin:
+    st.sidebar.markdown("---")
+    if sel_id is not None:
+        if st.sidebar.button(f"🗑️ Delete Submission #{sel_id}"):
+            # Remove issues and upload record
+            c.execute('DELETE FROM issues WHERE upload_id=?', (sel_id,))
+            c.execute('DELETE FROM uploads WHERE id=?', (sel_id,))
+            conn.commit()
+            st.sidebar.success(f"Submission {sel_id} deleted.")
+            st.experimental_rerun()
 
 # Fetch issues
 def load_issues(uid=None):
