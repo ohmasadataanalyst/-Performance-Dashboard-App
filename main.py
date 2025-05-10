@@ -11,17 +11,22 @@ from datetime import datetime, timedelta
 db_path = 'issues.db'
 conn = sqlite3.connect(db_path, check_same_thread=False)
 c = conn.cursor()
-# Create tables with file_type and category
+# Create tables (initial schema)
 c.execute(
     '''CREATE TABLE IF NOT EXISTS uploads (
            id INTEGER PRIMARY KEY AUTOINCREMENT,
            filename TEXT,
            uploader TEXT,
            timestamp TEXT,
-           file_type TEXT,
-           category TEXT,
            file BLOB
        )''')
+# Ensure new columns exist for file_type and category
+def add_column_if_not_exists(table, column, col_type):
+    cols = [row[1] for row in c.execute(f"PRAGMA table_info({table})")]
+    if column not in cols:
+        c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+add_column_if_not_exists('uploads','file_type','TEXT')
+add_column_if_not_exists('uploads','category','TEXT')
 
 c.execute(
     '''CREATE TABLE IF NOT EXISTS issues (
@@ -67,10 +72,10 @@ if username in view_only_users or is_admin(username, password):
     if is_admin(username, password):
         st.success("Welcome Admin! Upload new files or search past uploads.")
         # Admin selects metadata before upload
-        file_type = st.selectbox("Select file type", ["opening", "closing", "handover"])
+        file_type = st.selectbox("Select file type", ["opening", "closing", "handover", "meal training"])
         category = st.selectbox(
             "Select category",
-            ['operation-training', 'CCTV', 'complaints', 'missing', 'visits']
+            ['operation-training', 'CCTV', 'complaints', 'missing', 'visits', 'meal training']
         )
         uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"]) 
         if uploaded_file:
