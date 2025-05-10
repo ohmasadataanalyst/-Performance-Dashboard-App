@@ -79,7 +79,12 @@ default_wk = shutil.which('wkhtmltopdf') or ''
 wk_path = st.sidebar.text_input("Path to wkhtmltopdf:", default_wk, help="Install wkhtmltopdf and provide its path if not auto-detected.")
 
 # Load uploads
- df_uploads = pd.read_sql('SELECT id, filename, uploader, file_type, category, timestamp FROM uploads ORDER BY timestamp DESC', conn)
+# Note: no leading spaces before df_uploads
+
+df_uploads = pd.read_sql(
+    'SELECT id, filename, uploader, file_type, category, timestamp FROM uploads ORDER BY timestamp DESC',
+    conn
+)
 scope_options = ['All uploads'] + df_uploads.apply(
     lambda x: f"{x.id} - {x.filename} [{x.file_type}/{x.category}] by {x.uploader}@{x.timestamp}", axis=1
 ).tolist()
