@@ -7,11 +7,10 @@ import io
 from datetime import datetime, timedelta
 
 # Database setup
-# Note: If running first time, uploads table includes file_type and category fields
 db_path = 'issues.db'
 conn = sqlite3.connect(db_path, check_same_thread=False)
 c = conn.cursor()
-# Create tables (initial schema)
+# Create uploads table if not exists
 c.execute(
     '''CREATE TABLE IF NOT EXISTS uploads (
            id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,14 +19,14 @@ c.execute(
            timestamp TEXT,
            file BLOB
        )''')
-# Ensure new columns exist for file_type and category
-def add_column_if_not_exists(table, column, col_type):
-    cols = [row[1] for row in c.execute(f"PRAGMA table_info({table})")]
+# Ensure metadata columns
+def add_column(table, column, col_type):
+    cols = [r[1] for r in c.execute(f"PRAGMA table_info({table})")]
     if column not in cols:
         c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
-add_column_if_not_exists('uploads','file_type','TEXT')
-add_column_if_not_exists('uploads','category','TEXT')
-
+add_column('uploads','file_type','TEXT')
+add_column('uploads','category','TEXT')
+# Create issues table
 c.execute(
     '''CREATE TABLE IF NOT EXISTS issues (
            upload_id INTEGER,
@@ -41,155 +40,99 @@ c.execute(
        )''')
 conn.commit()
 
-# Store hashed passwords for admin users
+# Credentials
 db_admin = {
     "abdalziz alsalem": b"$2b$12$VzSUGELJcT7DaBWoGuJi8OLK7mvpLxRumSduEte8MDAPkOnuXMdnW",
     "omar salah": b"$2b$12$9VB3YRZRVe2RLxjO8FD3C.01ecj1cEShMAZGYbFCE3JdGagfaWomy",
     "ahmed khaled": b"$2b$12$wUMnrBOqsXlMLvFGkEn.b.xsK7Cl49iBCoLQHaUnTaPixjE7ByHEG",
     "mohamed hattab": b"$2b$12$X5hWO55U9Y0RobP9Mk7t3eW3AK.6uNajas8SkuxgY8zEwgY/bYIqe"
 }
-view_only_users = [
-    "mohamed emad", "mohamed houider", "sujan podel", "ali ismail", "islam mostafa"
-]
+view_only = ["mohamed emad","mohamed houider","sujan podel","ali ismail","islam mostafa"]
 
 # Streamlit config
 st.set_page_config(page_title="Performance Dashboard", layout="wide")
 st.title("📊 Performance Dashboard with SQLite Storage")
 
-# Authentication inputs
-username = st.text_input("Enter your full name:").strip().lower()
-password = st.text_input("Enter your password:", type="password")
+# Auth
+user = st.text_input("Enter your full name:").strip().lower()
+pwd = st.text_input("Enter your password:", type="password")
 
-def is_admin(user, pwd):
-    return user in db_admin and bcrypt.checkpw(pwd.encode(), db_admin[user])
-
-if not username:
-    st.info("Enter full name and password to proceed.")
+if not user:
+    st.info("Enter credentials to proceed.")
     st.stop()
 
-# Authentication and data loading
-if username in view_only_users or is_admin(username, password):
-    if is_admin(username, password):
-        st.success("Welcome Admin! Upload new files or search past uploads.")
-        # Admin selects metadata before upload
-        file_type = st.selectbox("Select file type", ["opening", "closing", "handover", "meal training"])
-        category = st.selectbox(
-            "Select category",
-            ['operation-training', 'CCTV', 'complaints', 'missing', 'visits', 'meal training']
+is_admin = user in db_admin and bcrypt.checkpw(pwd.encode(), db_admin[user])
+if not is_admin and user not in view_only:
+    st.error("Unauthorized user.")
+    st.stop()
+
+# Admin upload
+if is_admin:
+    st.success("Admin access granted.")
+    file_type = st.selectbox("File type", ["opening","closing","handover","meal training"])
+    category = st.selectbox("Category", ['operation-training','CCTV','complaints','missing','visits','meal training'])
+    up = st.file_uploader("Upload Excel", type=["xlsx"] )
+    if up:
+        b = up.getvalue()
+        ts = datetime.now().isoformat()
+        c.execute(
+            'INSERT INTO uploads (filename,uploader,timestamp,file_type,category,file) VALUES (?,?,?,?,?,?)',
+            (up.name,user,ts,file_type,category,sqlite3.Binary(b))
         )
-        uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"]) 
-        if uploaded_file:
-            file_bytes = uploaded_file.getvalue()
-            ts = datetime.now().isoformat()
-            # Insert into uploads with metadata
+        uid = c.lastrowid
+        dfu = pd.read_excel(io.BytesIO(b))
+        dfu.columns = dfu.columns.str.lower()
+        dfu['date'] = pd.to_datetime(dfu['date'],dayfirst=True)
+        for _,r in dfu.iterrows():
             c.execute(
-                'INSERT INTO uploads (filename, uploader, timestamp, file_type, category, file) VALUES (?,?,?,?,?,?)',
-                (uploaded_file.name, username, ts, file_type, category, sqlite3.Binary(file_bytes))
+                'INSERT INTO issues VALUES (?,?,?,?,?,?,?)',
+                (uid,r['code'],r['issues'],r['branch'],r['area manager'],r['date'].isoformat(),file_type)
             )
-            upload_id = c.lastrowid
-            df_upload = pd.read_excel(io.BytesIO(file_bytes))
-            df_upload.columns = df_upload.columns.str.lower()
-            df_upload['date'] = pd.to_datetime(df_upload['date'], dayfirst=True)
-            # Insert each row
-            for _, row in df_upload.iterrows():
-                c.execute(
-                    'INSERT INTO issues VALUES (?,?,?,?,?,?,?)',
-                    (upload_id, row['code'], row['issues'], row['branch'], row['area manager'], row['date'].isoformat(), file_type)
-                )
-            conn.commit()
-            st.success(
-                f"Uploaded '{uploaded_file.name}' as {file_type}/{category} (ID {upload_id}) with {len(df_upload)} records."
-            )
-        # Search past uploads
-        st.sidebar.header("🔍 Search Past Uploads")
-        uploads = pd.read_sql('SELECT id, filename, uploader, timestamp, file_type, category FROM uploads ORDER BY timestamp DESC', conn)
-        if not uploads.empty:
-            sel = st.sidebar.selectbox(
-                "Select upload", 
-                uploads.apply(lambda x: f"{x.id} - {x.filename} [{x.file_type}/{x.category}] by {x.uploader} @ {x.timestamp}", axis=1)
-            )
-            upload_id = int(sel.split(' - ')[0])
-            file_row = c.execute('SELECT file, filename FROM uploads WHERE id=?', (upload_id,)).fetchone()
-            if file_row:
-                file_blob, fname = file_row
-                st.sidebar.download_button("📥 Download original file", data=file_blob, file_name=fname)
-            df = pd.read_sql('SELECT * FROM issues WHERE upload_id=?', conn, params=(upload_id,))
-            df['date'] = pd.to_datetime(df['date'])
-        else:
-            st.sidebar.info("No uploads yet.")
-            df = pd.DataFrame()
+        conn.commit()
+        st.success(f"Uploaded {up.name} as {file_type}/{category} with {len(dfu)} records.")
+    st.sidebar.header("Past Uploads")
+    ups = pd.read_sql('SELECT id,filename,uploader,timestamp,file_type,category FROM uploads ORDER BY timestamp DESC',conn)
+    if not ups.empty:
+        choice = st.sidebar.selectbox("Upload",ups.apply(lambda x:f"{x.id}-{x.filename}[{x.file_type}/{x.category}]",axis=1))
+        sel_id=int(choice.split('-')[0])
     else:
-        st.info("View-only: Displaying latest combined issues report.")
-        df = pd.read_sql('SELECT * FROM issues', conn)
-        if not df.empty:
-            df['date'] = pd.to_datetime(df['date'])
+        sel_id=None
 else:
-    st.error("Unauthorized user. Please contact the administrator.")
+    st.info("View-only mode.")
+    # show latest combined
+    sel_id=None
+
+# Load issues based on selection or all
+def load_issues(uid):
+    if uid:
+        return pd.read_sql(f"SELECT issues.*,u.category FROM issues JOIN uploads u ON u.id=issues.upload_id WHERE upload_id={uid}",conn,parse_dates=['date'])
+    return pd.read_sql("SELECT issues.*,u.category FROM issues JOIN uploads u ON u.id=issues.upload_id",conn,parse_dates=['date'])
+
+df = load_issues(sel_id)
+if df.empty:
+    st.warning("No data.")
     st.stop()
 
-# Reporting section
-if df.empty:
-    st.warning("No issue data to display.")
-else:
-    st.sidebar.header("🛠️ Filters")
-    # Date range filter
-    min_date = df['date'].min().date()
-    max_date = df['date'].max().date()
-    date_range = st.sidebar.date_input("Date range", [min_date, max_date])
-    if len(date_range) != 2:
-        st.error("Please select a valid start and end date.")
-        st.stop()
-    start_date, end_date = date_range
-    start = datetime.combine(start_date, datetime.min.time())
-    end = datetime.combine(end_date, datetime.max.time())
+# Filters
+dates = st.sidebar.date_input("Date range",[df['date'].min().date(),df['date'].max().date()])
+if len(dates)!=2:
+    st.error("Select start and end")
+    st.stop()
+start,end=[datetime.combine(d,datetime.min.time()) if i==0 else datetime.combine(d,datetime.max.time()) for i,d in enumerate(dates)]
+cats = st.sidebar.multiselect("Upload Category",df['category'].unique(),default=df['category'].unique())
+mask=(df['date']>=start)&(df['date']<=end)&df['category'].isin(cats)
+f=df.loc[mask]
 
-    # Category filter (upload category)
-    categories = pd.read_sql('SELECT DISTINCT category FROM uploads', conn)['category'].tolist()
-    selected_categories = st.sidebar.multiselect("Upload Category", categories, default=categories)
-
-    mask = (
-        (df['date'] >= start) & (df['date'] <= end)
-    )
-    # Join with uploads to filter by category
-    df = pd.read_sql('''
-        SELECT issues.*, uploads.category FROM issues
-        JOIN uploads ON issues.upload_id = uploads.id
-    ''', conn, parse_dates=['date'])
-    mask &= df['category'].isin(selected_categories)
-    filtered = df.loc[mask]
-
-    st.subheader(f"📈 Issues Report: {start.date()} to {end.date()}")
-    st.write(f"Total issues: {len(filtered)}")
-
-    # Top branches
-    branch_counts = filtered['branch'].value_counts().reset_index()
-    branch_counts.columns = ['branch', 'count']
-    st.plotly_chart(
-        px.bar(branch_counts.head(10), x='branch', y='count', title='Top 10 Branches'),
-        use_container_width=True
-    )
-
-    # Trend over time
-    trend = filtered.groupby(filtered['date'].dt.date).size().reset_index(name='count')
-    st.plotly_chart(
-        px.line(trend, x='date', y='count', title='Daily Issue Trend'),
-        use_container_width=True
-    )
-
-    # Top issue descriptions
-    st.subheader("🔍 Top Issue Descriptions")
-    issue_counts = filtered['issues'].value_counts().rename_axis('issue').reset_index(name='count')
-    st.dataframe(issue_counts.head(20))
-
-    # By area manager
-    am_counts = filtered['area_manager'].value_counts().reset_index()
-    am_counts.columns = ['area manager', 'count']
-    st.plotly_chart(
-        px.pie(am_counts, names='area manager', values='count', title='Issues by Area Manager'),
-        use_container_width=True
-    )
-
-    # Download filtered data
-    st.download_button(
-        "📥 Download Filtered Data", filtered.to_csv(index=False).encode(), "issues_report.csv"
-    )
+# Report
+st.subheader(f"Report: {start.date()} to {end.date()}")
+st.write(f"Total issues: {len(f)}")
+# Charts
+t1=f['branch'].value_counts().head(10).reset_index();t1.columns=['branch','count']
+st.plotly_chart(px.bar(t1,x='branch',y='count',title='Top Branches'),use_container_width=True)
+t2=f.groupby(f['date'].dt.date).size().reset_index(name='count')
+st.plotly_chart(px.line(t2,x='date',y='count',title='Trend'),use_container_width=True)
+st.subheader("Top Issues")
+st.dataframe(f['issues'].value_counts().rename_axis('issue').reset_index(name='count').head(20))
+t3=f['area_manager'].value_counts().reset_index();t3.columns=['area_manager','count']
+st.plotly_chart(px.pie(t3,names='area_manager',values='count',title='By Area Manager'),use_container_width=True)
+st.download_button("Download CSV",f.to_csv(index=False).encode(),"issues.csv")
