@@ -183,20 +183,28 @@ figs.append(('daily_trend', fig_trend))
 # Download filtered data
 st.download_button("📥 Download Data CSV", df_filtered.to_csv(index=False).encode(), "issues.csv")
 
-# Download visuals
-if st.button("📥 Download Visuals"):
-    buf = io.BytesIO()
-    with ZipFile(buf, 'w') as zipf:
+# Download visuals as PDF
+import base64
+if st.button("📥 Download Visuals as PDF"):
+    if not wk_path:
+        st.error("Provide wkhtmltopdf path.")
+    else:
+        # Build HTML embedding each chart as base64 image
+        html_parts = ["<html><body>"]
         for name, fig in figs:
-            # Use Plotly's write_image (requires kaleido in requirements.txt)
-            img_buf = io.BytesIO()
-            fig.write_image(img_buf, format='png')
-            img_buf.seek(0)
-            zipf.writestr(f"{name}.png", img_buf.read())
-    buf.seek(0)
-    st.download_button("Download Visuals ZIP", buf.getvalue(), "visuals.zip", mime="application/zip")
+            # Export figure to PNG bytes
+            img_bytes = fig.to_image(format='png')
+            b64 = base64.b64encode(img_bytes).decode()
+            title = name.replace('_', ' ').title()
+            html_parts.append(f"<h2>{title}</h2><img src='data:image/png;base64,{b64}' /><br/>")
+        html_parts.append("</body></html>")
+        html_content = ''.join(html_parts)
+        # Generate PDF
+        pdf_bytes = generate_pdf(html_content, fname='visuals.pdf')
+        if pdf_bytes:
+            st.download_button("Download Visuals PDF", pdf_bytes, "visuals.pdf", "application/pdf")
 
-# PDF export (optional) (optional)
+# PDF export (optional) (optional) (optional)
 def generate_pdf(html, fname='dashboard.pdf'):
     if not wk_path:
         st.error("Provide wkhtmltopdf path.")
