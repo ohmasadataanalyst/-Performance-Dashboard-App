@@ -2,17 +2,36 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import bcrypt
-import os
+import sqlite3
+import io
 from datetime import datetime, timedelta
 
-# Persistent storage path
-STORAGE_PATH = 'stored_issues.csv'
+# Database setup
+db_path = 'issues.db'
+conn = sqlite3.connect(db_path, check_same_thread=False)
+c = conn.cursor()
+# Create tables
+c.execute(
+    '''CREATE TABLE IF NOT EXISTS uploads (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           filename TEXT,
+           uploader TEXT,
+           timestamp TEXT,
+           file BLOB
+       )''')
 
-# Load existing storage or initialize empty DataFrame
-if os.path.exists(STORAGE_PATH):
-    stored_df = pd.read_csv(STORAGE_PATH, parse_dates=['date'])
-else:
-    stored_df = pd.DataFrame(columns=['code','issues','branch','area manager','date','report type'])
+c.execute(
+    '''CREATE TABLE IF NOT EXISTS issues (
+           upload_id INTEGER,
+           code TEXT,
+           issues TEXT,
+           branch TEXT,
+           area_manager TEXT,
+           date TEXT,
+           report_type TEXT,
+           FOREIGN KEY(upload_id) REFERENCES uploads(id)
+       )''')
+conn.commit()
 
 # Store hashed passwords for admin users
 db_admin = {
@@ -27,97 +46,96 @@ view_only_users = [
 
 # Streamlit config
 st.set_page_config(page_title="Performance Dashboard", layout="wide")
-st.title("📊 Performance Dashboard from Excel")
+st.title("📊 Performance Dashboard with SQLite Storage")
 
 # Authentication inputs
 username = st.text_input("Enter your full name:").strip().lower()
 password = st.text_input("Enter your password:", type="password")
 
-# Helper to check admin credentials
 def is_admin(user, pwd):
     return user in db_admin and bcrypt.checkpw(pwd.encode(), db_admin[user])
 
-# Decide on data source: for admins after upload, storage updates, for view-only, just storage
-if username:
-    if is_admin(username, password):
-        st.success("Welcome Admin! You can upload new data or view reports.")
-        uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
-        if uploaded_file:
-            upload_df = pd.read_excel(uploaded_file)
-            # Standardize and validate
-            expected = {"code","issues","branch","area manager","date","report type"}
-            if expected.issubset(upload_df.columns.str.lower()):
-                upload_df.columns = upload_df.columns.str.lower()
-                upload_df['date'] = pd.to_datetime(upload_df['date'], dayfirst=True)
-                # Append new data, drop duplicates
-                combined = pd.concat([stored_df, upload_df], ignore_index=True)
-                combined.drop_duplicates(subset=combined.columns.tolist(), inplace=True)
-                # Save back to storage
-                combined.to_csv(STORAGE_PATH, index=False)
-                stored_df = combined
-                st.success(f"Data uploaded and saved. Total records: {len(stored_df)}")
-            else:
-                st.error(f"Excel must contain columns: {', '.join(expected)}")
-        # Use stored_df for reporting
-        df = stored_df.copy()
-    elif username in view_only_users:
-        st.info("View-only: Displaying saved reports.")
-        df = stored_df.copy()
-    else:
-        st.error("Unauthorized user. Please contact the administrator.")
-        st.stop()
-else:
+if not username:
     st.info("Enter full name and password to proceed.")
     st.stop()
 
-# If we reach here, df contains data to report
-if df.empty:
-    st.warning("No data available. Admins can upload new data.")
+if username in view_only_users or is_admin(username, password):
+    if is_admin(username, password):
+        st.success("Welcome Admin! Upload new files or search past uploads.")
+        # Upload new file
+        uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"] )
+        if uploaded_file:
+            # Read bytes and store
+            file_bytes = uploaded_file.getvalue()
+            ts = datetime.now().isoformat()
+            c.execute(
+                'INSERT INTO uploads (filename, uploader, timestamp, file) VALUES (?,?,?,?)',
+                (uploaded_file.name, username, ts, sqlite3.Binary(file_bytes))
+            )
+            upload_id = c.lastrowid
+            df = pd.read_excel(io.BytesIO(file_bytes))
+            df.columns = df.columns.str.lower()
+            df['date'] = pd.to_datetime(df['date'], dayfirst=True)
+            # Insert rows
+            for _, row in df.iterrows():
+                c.execute(
+                    'INSERT INTO issues VALUES (?,?,?,?,?,?,?)',
+                    (upload_id, row['code'], row['issues'], row['branch'], row['area manager'], row['date'].isoformat(), row['report type'])
+                )
+            conn.commit()
+            st.success(f"File '{uploaded_file.name}' uploaded with ID {upload_id} and {len(df)} issues.")
+        # Search past uploads
+        st.sidebar.header("🔍 Search Past Uploads")
+        uploads = pd.read_sql('SELECT id, filename, uploader, timestamp FROM uploads ORDER BY timestamp DESC', conn)
+        if not uploads.empty:
+            sel = st.sidebar.selectbox("Select upload", uploads.apply(lambda x: f"{x.id} - {x.filename} by {x.uploader} @ {x.timestamp}", axis=1))
+            upload_id = int(sel.split(' - ')[0])
+            # Offer download
+            file_row = c.execute('SELECT file, filename FROM uploads WHERE id=?', (upload_id,)).fetchone()
+            if file_row:
+                file_blob, fname = file_row
+                st.sidebar.download_button("📥 Download original file", data=file_blob, file_name=fname)
+            # Load issues from that upload
+            df = pd.read_sql('SELECT * FROM issues WHERE upload_id=?', conn, params=(upload_id,))
+            df['date'] = pd.to_datetime(df['date'])
+        else:
+            st.sidebar.info("No uploads yet.")
+            df = pd.DataFrame()
+    else:
+        st.info("View-only: Displaying latest combined issues report.")
+        # Load all issues
+        df = pd.read_sql('SELECT * FROM issues', conn)
+        if not df.empty:
+            df['date'] = pd.to_datetime(df['date'])
 else:
-    # Sidebar filters
+    st.error("Unauthorized user. Please contact the administrator.")
+    st.stop()
+
+# Reporting
+if df.empty:
+    st.warning("No issue data to display.")
+else:
     st.sidebar.header("🛠️ Filters")
     freq = st.sidebar.selectbox("Frequency", ['Daily', 'Weekly', 'Monthly', 'Yearly'])
-    report_types = st.sidebar.multiselect("Report Type", df['report type'].unique(), default=df['report type'].unique())
-
-    # Compute date range based on freq
+    report_types = st.sidebar.multiselect("Report Type", df['report_type'].unique(), default=df['report_type'].unique())
     now = datetime.now()
     if freq == 'Daily': start = now - timedelta(days=1)
     elif freq == 'Weekly': start = now - timedelta(weeks=1)
     elif freq == 'Monthly': start = now - timedelta(days=30)
     else: start = now - timedelta(days=365)
-
-    mask = (df['date'] >= start) & (df['date'] <= now) & df['report type'].isin(report_types)
+    mask = (df['date'] >= start) & (df['date'] <= now) & df['report_type'].isin(report_types)
     filtered = df.loc[mask]
-
     st.subheader(f"📈 Issues Report: {freq} ({start.date()} to {now.date()})")
     st.write(f"Total issues: {len(filtered)}")
-
-    # Top branches
-    st.subheader("🏷️ Top Branches by Issue Count")
+    # Charts and tables
     branch_counts = filtered['branch'].value_counts().reset_index()
     branch_counts.columns = ['branch', 'count']
-    fig1 = px.bar(branch_counts.head(10), x='branch', y='count', title='Top 10 Branches')
-    st.plotly_chart(fig1, use_container_width=True)
-
-    # Trend over time
-    st.subheader("⏱️ Issue Trend Over Time")
+    st.plotly_chart(px.bar(branch_counts.head(10), x='branch', y='count', title='Top 10 Branches'), use_container_width=True)
     trend = filtered.groupby(filtered['date'].dt.date).size().reset_index(name='count')
-    fig2 = px.line(trend, x='date', y='count', title='Daily Issue Trend')
-    st.plotly_chart(fig2, use_container_width=True)
-
-    # Top issue types
+    st.plotly_chart(px.line(trend, x='date', y='count', title='Daily Issue Trend'), use_container_width=True)
     st.subheader("🔍 Top Issue Descriptions")
-    issue_counts = filtered['issues'].value_counts().reset_index()
-    issue_counts.columns = ['issue', 'count']
-    st.dataframe(issue_counts.head(20))
-
-    # By area manager
-    st.subheader("👤 Issues by Area Manager")
-    am_counts = filtered['area manager'].value_counts().reset_index()
+    st.dataframe(filtered['issues'].value_counts().rename_axis('issue').reset_index(name='count').head(20))
+    am_counts = filtered['area_manager'].value_counts().reset_index()
     am_counts.columns = ['area manager', 'count']
-    fig3 = px.pie(am_counts, names='area manager', values='count', title='Issues by Area Manager')
-    st.plotly_chart(fig3, use_container_width=True)
-
-    # Download
-    csv = filtered.to_csv(index=False).encode()
-    st.download_button("📥 Download Filtered Data", data=csv, file_name="issues_report.csv")
+    st.plotly_chart(px.pie(am_counts, names='area manager', values='count', title='Issues by Area Manager'), use_container_width=True)
+    st.download_button("📥 Download Filtered Data", filtered.to_csv(index=False).encode(), "issues_report.csv")
