@@ -1,0 +1,86 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import bcrypt
+from datetime import datetime, timedelta
+
+# Store hashed passwords
+admin_users = {
+    "abdalziz alsalem": b"$2b$12$JDIBqBA2HY3RpjzZlD7mJeqJSPULeV18ZtAvUq9.R9NLNU9lFfJTK",
+    "omar salah": b"$2b$12$zECM5rBCs1B7CuYGMUrf3Oj1sv8QkkmGUuRMsHvZ/kAjbnMZ4neVm",
+    "ahmed khaled": b"$2b$12$W8pO6ahYdDM7k9wvKfFWp.vU5ITVDTtnzJPPj9Ydu3pt2oV5hEMuy",
+    "mohamed hattab": b"$2b$12$EKONPrQzC6RilRjqb3DQpuwN7ts3jCHb9FSClXdx1CtAzAz3g6L1q"
+}
+view_only_users = ["mohamed emad", "mohamed houider", "sujan podel", "ali ismail", "islam mostafa"]
+
+# Page config
+st.set_page_config(page_title="Performance Dashboard", layout="wide")
+st.title("📊 Performance Dashboard from Excel")
+
+# Authentication
+username = st.text_input("Enter your full name:").strip().lower()
+password = st.text_input("Enter your password:", type="password")
+
+if username:
+    if username in admin_users and bcrypt.checkpw(password.encode(), admin_users[username]):
+        st.success("Welcome Admin! You have full access.")
+
+        # File upload
+        uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
+        if uploaded_file:
+            df = pd.read_excel(uploaded_file)
+            # Ensure necessary columns
+            if 'Date' in df.columns and 'Category' in df.columns and 'Performance' in df.columns:
+                # Convert Date
+                df['Date'] = pd.to_datetime(df['Date'])
+
+                # Sidebar for report selection
+                st.sidebar.header("🛠️ Report Filters")
+                freq = st.sidebar.selectbox("Select frequency", ['Daily', 'Weekly', 'Monthly', 'Yearly'])
+                category = st.sidebar.multiselect(
+                    "Select category",
+                    ['operation-training', 'CCTV', 'complaints', 'missing', 'visits'],
+                    default=['operation-training', 'CCTV', 'complaints', 'missing', 'visits']
+                )
+                
+                # Determine date range
+                end_date = datetime.now()
+                if freq == 'Daily':
+                    start_date = end_date - timedelta(days=1)
+                elif freq == 'Weekly':
+                    start_date = end_date - timedelta(weeks=1)
+                elif freq == 'Monthly':
+                    start_date = end_date - timedelta(days=30)
+                else:  # Yearly
+                    start_date = end_date - timedelta(days=365)
+
+                mask = (df['Date'] >= start_date) & (df['Date'] <= end_date) & df['Category'].isin(category)
+                filtered = df.loc[mask]
+
+                st.subheader(f"📈 {freq} {', '.join(category)} Report")
+                st.write(f"Showing records from {start_date.date()} to {end_date.date()}")
+                st.dataframe(filtered)
+
+                # Visualization
+                st.subheader("Performance Over Time")
+                fig = px.line(
+                    filtered.groupby('Date')['Performance'].mean().reset_index(),
+                    x='Date', y='Performance', title='Average Performance'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Download
+                csv = filtered.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Download Filtered Data", data=csv, file_name="filtered_performance.csv")
+
+            else:
+                st.error("Your file must contain 'Date', 'Category', and 'Performance' columns.")
+        else:
+            st.info("Upload your data to view reports.")
+
+    elif username in view_only_users:
+        st.info("View-only mode. Data upload is restricted. View the latest report above.")
+    else:
+        st.error("Unauthorized user. Please contact the administrator.")
+else:
+    st.info("Please enter your full name and password to proceed.")
