@@ -41,7 +41,7 @@ db_admin = {
     "ahmed khaled": b"$2b$12$wUMnrBOqsXlMLvFGkEn.b.xsK7Cl49iBCoLQHaUnTaPixjE7ByHEG",
     "mohamed hattab": b"$2b$12$X5hWO55U9Y0RobP9Mk7t3eW3AK.6uNajas8SkuxgY8zEwgY/bYIqe"
 }
-view_only = ["mohamed emad","mohamed houider","sujan podel","ali ismail","islam mostafa"]
+view_only = ["mohamed emad", "mohamed houider", "sujan podel", "ali ismail", "islam mostafa"]
 
 # Streamlit config
 st.set_page_config(page_title="Performance Dashboard", layout="wide")
@@ -73,53 +73,23 @@ def generate_pdf(html, fname='dashboard.pdf', wk_path=None):
         st.error(f"PDF error: {e}")
         return None
 
-# Admin controls
-if is_admin:
-    st.success("Admin access granted.")
-    if st.button("🗑️ Clear all uploads and issues"):
-        c.execute('DELETE FROM issues')
-        c.execute('DELETE FROM uploads')
-        conn.commit()
-        st.warning("All uploads and issues cleared.")
-    file_type = st.selectbox("File type", ["opening","closing","handover","meal training"])
-    category = st.selectbox("Category", ['operation-training','CCTV','complaints','missing','visits','meal training'])
-    up = st.file_uploader("Upload Excel", type=["xlsx"])
-    if up:
-        data = up.getvalue()
-        ts = datetime.now().isoformat()
-        c.execute(
-            'INSERT INTO uploads (filename,uploader,timestamp,file_type,category,file) VALUES (?,?,?,?,?,?)',
-            (up.name, user, ts, file_type, category, sqlite3.Binary(data))
-        )
-        uid = c.lastrowid
-        df_up = pd.read_excel(io.BytesIO(data))
-        df_up.columns = df_up.columns.str.lower()
-        df_up['date'] = pd.to_datetime(df_up['date'], dayfirst=True)
-        for _, row in df_up.iterrows():
-            c.execute(
-                'INSERT INTO issues VALUES (?,?,?,?,?,?,?)',
-                (uid, row['code'], row['issues'], row['branch'], row['area manager'], row['date'].isoformat(), file_type)
-            )
-        conn.commit()
-        st.success(f"Uploaded '{up.name}' as {file_type}/{category} with {len(df_up)} records.")
-
 # Sidebar: filters & wkhtmltopdf path
 st.sidebar.header("🔍 Filters & Options")
 default_wk = shutil.which('wkhtmltopdf') or ''
 wk_path = st.sidebar.text_input("Path to wkhtmltopdf:", default_wk, help="Install wkhtmltopdf and provide its path if not auto-detected.")
 
-# Load data
-
-# Upload selection
-
-df_uploads = pd.read_sql('SELECT id, filename, uploader, file_type, category, timestamp FROM uploads ORDER BY timestamp DESC', conn)
-scope_options = ['All uploads'] + df_uploads.apply(lambda x: f"{x.id} - {x.filename} [{x.file_type}/{x.category}] by {x.uploader}@{x.timestamp}", axis=1).tolist()
+# Load uploads
+ df_uploads = pd.read_sql('SELECT id, filename, uploader, file_type, category, timestamp FROM uploads ORDER BY timestamp DESC', conn)
+scope_options = ['All uploads'] + df_uploads.apply(
+    lambda x: f"{x.id} - {x.filename} [{x.file_type}/{x.category}] by {x.uploader}@{x.timestamp}", axis=1
+).tolist()
 selection = st.sidebar.selectbox("Select upload scope", scope_options)
 sel_id = None if selection.startswith('All') else int(selection.split(' - ')[0])
 
 # Fetch issues
 def load_issues(uid=None):
-    sql = 'SELECT issues.*, u.category, u.uploader FROM issues JOIN uploads u ON u.id=issues.upload_id'
+    sql = ('SELECT issues.*, u.category, u.uploader '
+           'FROM issues JOIN uploads u ON u.id=issues.upload_id')
     params = ()
     if uid:
         sql += ' WHERE upload_id=?'
@@ -147,7 +117,7 @@ sel_cats = st.sidebar.multiselect("Category", categories, default=categories)
 sel_branches = st.sidebar.multiselect("Branch", b_branches, default=b_branches)
 
 # Apply filters
-df_filtered = df.loc[
+df_filtered = df[
     (df['date'] >= start_date) & (df['date'] <= end_date) &
     df['category'].isin(sel_cats) & df['branch'].isin(sel_branches)
 ]
@@ -184,14 +154,23 @@ fig_trend = px.line(trend, x='date', y='count', title='Daily Trend')
 st.plotly_chart(fig_trend, use_container_width=True)
 figs.append(('Daily Trend', fig_trend))
 
-# Detailed records for single-day\if (end_date.date() - start_date.date()).days == 0:
+# Detailed records for single-day
+if (end_date.date() - start_date.date()).days == 0:
     st.subheader("Detailed Records")
     st.dataframe(df_filtered)
 
-# Top issues\st.subheader("Top Issues")
-st.dataframe(df_filtered['issues'].value_counts().rename_axis('issue').reset_index(name='count').head(20))
+# Top issues
+st.subheader("Top Issues")
+st.dataframe(
+    df_filtered['issues']
+        .value_counts()
+        .rename_axis('issue')
+        .reset_index(name='count')
+        .head(20)
+)
 
-# Download data\ st.download_button("📥 Download Data CSV", df_filtered.to_csv(index=False).encode(), "issues.csv")
+# Download data
+st.download_button("📥 Download Data CSV", df_filtered.to_csv(index=False).encode(), "issues.csv")
 
 # Download visuals as PDF
 if st.button("📥 Download Visuals as PDF"):
