@@ -86,7 +86,87 @@ if is_admin:
         conn.commit()
         st.success(f"Uploaded '{up.name}' as {file_type}/{category} with {len(df_up)} records.")
 
+# Sidebar: upload scope and filters
+st.sidebar.header("🔍 Choose Upload Scope & Filters")
 # Upload scope
-st.sidebar.header("🔍 Choose Upload Scope")
-uploads = pd.read_sql('SELECT id,filename,file_type,category,timestamp FROM uploads ORDER BY timestamp DESC', conn)
-scope = ['All uploads'] + uploads.apply(lambda x: f"{x.id} - {x.filename} [{x.file_type}/{x.category}]", axis=1).tolist()
+df_uploads = pd.read_sql('SELECT id,filename,file_type,category,timestamp FROM uploads ORDER BY timestamp DESC', conn)
+scope_options = ['All uploads'] + df_uploads.apply(
+    lambda x: f"{x.id} - {x.filename} [{x.file_type}/{x.category}] by {x.uploader if 'uploader' in x else ''}@{x.timestamp}",
+    axis=1
+).tolist()
+selection = st.sidebar.selectbox("Select upload scope", scope_options)
+sel_id = None if selection.startswith('All') else int(selection.split(' - ')[0])
+
+# Load data
+def load_issues(uid=None):
+    sql = 'SELECT issues.*, u.category, u.uploader FROM issues JOIN uploads u ON u.id=issues.upload_id'
+    params = None
+    if uid:
+        sql += ' WHERE upload_id=?'
+        params = (uid,)
+    df = pd.read_sql(sql, conn, params=params, parse_dates=['date'])
+    return df
+
+df = load_issues(sel_id)
+if df.empty:
+    st.warning("No data to display.")
+    st.stop()
+
+# Date range filter
+min_d, max_d = df['date'].min().date(), df['date'].max().date()
+start_end = st.sidebar.date_input("Date range", [min_d, max_d])
+if len(start_end) != 2:
+    st.error("Please select a start and end date.")
+    st.stop()
+start_date = datetime.combine(start_end[0], datetime.min.time())
+end_date = datetime.combine(start_end[1], datetime.max.time())
+
+# Category filter
+categories = df['category'].unique().tolist()
+sel_cats = st.sidebar.multiselect("Upload Category", categories, default=categories)
+
+# Filtered df
+mask = (
+    (df['date'] >= start_date) & (df['date'] <= end_date) &
+    df['category'].isin(sel_cats)
+)
+df_filtered = df.loc[mask]
+
+# Dashboard
+st.subheader(f"Issues Summary: {start_end[0]} to {start_end[1]}")
+st.write(f"Total issues in range: {len(df_filtered)}")
+
+# Determine if single day or range
+if (end_date.date() - start_date.date()).days > 0:
+    # Aggregated summaries
+    # Summary by Branch
+    b_summary = df_filtered.groupby('branch').size().reset_index(name='total_issues')
+    st.plotly_chart(px.bar(b_summary, x='branch', y='total_issues', title='Issues per Branch'), use_container_width=True)
+
+    # Summary by Area Manager
+    am_summary = df_filtered.groupby('area_manager').size().reset_index(name='total_issues')
+    st.plotly_chart(px.pie(am_summary, names='area_manager', values='total_issues', title='Issues by Area Manager'), use_container_width=True)
+
+    # Summary by Report Type
+    rt_summary = df_filtered.groupby('report_type').size().reset_index(name='total_issues')
+    st.plotly_chart(px.bar(rt_summary, x='report_type', y='total_issues', title='Issues by Report Type'), use_container_width=True)
+
+    # Summary by Category
+    cat_summary = df_filtered.groupby('category').size().reset_index(name='total_issues')
+    st.plotly_chart(px.bar(cat_summary, x='category', y='total_issues', title='Issues by Upload Category'), use_container_width=True)
+else:
+    # Single day: show detailed records
+    st.subheader("Detailed Records for Single Day")
+    st.dataframe(df_filtered)
+
+# Detailed top issues table
+st.subheader("Top Issue Descriptions")
+st.dataframe(df_filtered['issues'].value_counts().rename_axis('issue').reset_index(name='count').head(20))
+
+# Trend over time
+trend = df_filtered.groupby(df_filtered['date'].dt.date).size().reset_index(name='count')
+st.plotly_chart(px.line(trend, x='date', y='count', title='Daily Issue Trend'), use_container_width=True)
+
+# Download filtered data
+st.download_button("📥 Download Filtered Data", df_filtered.to_csv(index=False).encode(), "issues_report.csv")
+st.download_button("📥 Download Filtered Data", df_filtered.to_csv(index=False).encode(), "issues_report.csv")
