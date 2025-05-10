@@ -88,10 +88,13 @@ if is_admin:
 
 # Sidebar: upload scope and filters
 st.sidebar.header("🔍 Choose Upload Scope & Filters")
-# Upload scope
-df_uploads = pd.read_sql('SELECT id,filename,file_type,category,timestamp FROM uploads ORDER BY timestamp DESC', conn)
+
+df_uploads = pd.read_sql(
+    'SELECT id, filename, uploader, file_type, category, timestamp FROM uploads ORDER BY timestamp DESC',
+    conn
+)
 scope_options = ['All uploads'] + df_uploads.apply(
-    lambda x: f"{x.id} - {x.filename} [{x.file_type}/{x.category}] by {x.uploader if 'uploader' in x else ''}@{x.timestamp}",
+    lambda x: f"{x.id} - {x.filename} [{x.file_type}/{x.category}] by {x.uploader}@{x.timestamp}",
     axis=1
 ).tolist()
 selection = st.sidebar.selectbox("Select upload scope", scope_options)
@@ -104,8 +107,7 @@ def load_issues(uid=None):
     if uid:
         sql += ' WHERE upload_id=?'
         params = (uid,)
-    df = pd.read_sql(sql, conn, params=params, parse_dates=['date'])
-    return df
+    return pd.read_sql(sql, conn, params=params, parse_dates=['date'])
 
 df = load_issues(sel_id)
 if df.empty:
@@ -136,32 +138,37 @@ df_filtered = df.loc[mask]
 st.subheader(f"Issues Summary: {start_end[0]} to {start_end[1]}")
 st.write(f"Total issues in range: {len(df_filtered)}")
 
-# Determine if single day or range
-if (end_date.date() - start_date.date()).days > 0:
-    # Aggregated summaries
-    # Summary by Branch
-    b_summary = df_filtered.groupby('branch').size().reset_index(name='total_issues')
-    st.plotly_chart(px.bar(b_summary, x='branch', y='total_issues', title='Issues per Branch'), use_container_width=True)
+# Aggregated summaries and visuals (always shown)
+# Summary by Branch
+b_summary = df_filtered.groupby('branch').size().reset_index(name='total_issues')
+st.plotly_chart(px.bar(b_summary, x='branch', y='total_issues', title='Issues per Branch'), use_container_width=True)
 
-    # Summary by Area Manager
-    am_summary = df_filtered.groupby('area_manager').size().reset_index(name='total_issues')
-    st.plotly_chart(px.pie(am_summary, names='area_manager', values='total_issues', title='Issues by Area Manager'), use_container_width=True)
+# Summary by Area Manager
+am_summary = df_filtered.groupby('area_manager').size().reset_index(name='total_issues')
+st.plotly_chart(px.pie(am_summary, names='area_manager', values='total_issues', title='Issues by Area Manager'), use_container_width=True)
 
-    # Summary by Report Type
-    rt_summary = df_filtered.groupby('report_type').size().reset_index(name='total_issues')
-    st.plotly_chart(px.bar(rt_summary, x='report_type', y='total_issues', title='Issues by Report Type'), use_container_width=True)
+# Summary by Report Type
+rt_summary = df_filtered.groupby('report_type').size().reset_index(name='total_issues')
+st.plotly_chart(px.bar(rt_summary, x='report_type', y='total_issues', title='Issues by Report Type'), use_container_width=True)
 
-    # Summary by Category
-    cat_summary = df_filtered.groupby('category').size().reset_index(name='total_issues')
-    st.plotly_chart(px.bar(cat_summary, x='category', y='total_issues', title='Issues by Upload Category'), use_container_width=True)
-else:
-    # Single day: show detailed records
-    st.subheader("Detailed Records for Single Day")
+# Summary by Category
+cat_summary = df_filtered.groupby('category').size().reset_index(name='total_issues')
+st.plotly_chart(px.bar(cat_summary, x='category', y='total_issues', title='Issues by Upload Category'), use_container_width=True)
+
+# For single-day selection, also show detailed records
+if (end_date.date() - start_date.date()).days == 0:
+    st.subheader("Detailed Records for Selected Day")
     st.dataframe(df_filtered)
 
 # Detailed top issues table
 st.subheader("Top Issue Descriptions")
-st.dataframe(df_filtered['issues'].value_counts().rename_axis('issue').reset_index(name='count').head(20))
+st.dataframe(
+    df_filtered['issues']
+    .value_counts()
+    .rename_axis('issue')
+    .reset_index(name='count')
+    .head(20)
+)
 
 # Trend over time
 trend = df_filtered.groupby(df_filtered['date'].dt.date).size().reset_index(name='count')
@@ -171,26 +178,21 @@ st.plotly_chart(px.line(trend, x='date', y='count', title='Daily Issue Trend'), 
 st.download_button("📥 Download Filtered Data", df_filtered.to_csv(index=False).encode(), "issues_report.csv")
 
 # Download dashboard as PDF
-if st.button("📄 Download Dashboard as PDF"):
+def generate_pdf(html_content, filename='dashboard_report.pdf'):
     try:
         import pdfkit
-        # Use query_params instead of experimental_get_query_params
-        html_content = str(st.query_params)
-        # Write HTML placeholder
-        with open('dashboard.html', 'w') as f:
-            f.write(html_content)
-        # Generate PDF (ensure wkhtmltopdf is installed or configure path)
-        try:
-            pdfkit.from_file('dashboard.html', 'dashboard.pdf')
-        except OSError:
-            # Example of custom wkhtmltopdf path; adjust as needed
-            path_wk = '/usr/local/bin/wkhtmltopdf'
-            config = pdfkit.configuration(wkhtmltopdf=path_wk)
-            pdfkit.from_file('dashboard.html', 'dashboard.pdf', configuration=config)
-        with open('dashboard.pdf', 'rb') as pdf_file:
-            PDFbyte = pdf_file.read()
-        st.download_button("Download PDF", PDFbyte, file_name="dashboard.pdf", mime='application/pdf')
+        path_wk = '/usr/local/bin/wkhtmltopdf'  # adjust if needed
+        config = pdfkit.configuration(wkhtmltopdf=path_wk)
+        pdfkit.from_string(html_content, filename, configuration=config)
+        with open(filename, 'rb') as f:
+            return f.read()
     except Exception as e:
-        st.error(
-            "Failed to generate PDF. Ensure wkhtmltopdf is installed and accessible. Error: " + str(e)
-        )
+        st.error(f"Failed to generate PDF: {e}")
+        return None
+
+if st.button("📄 Download Dashboard as PDF"):
+    # Build simple HTML report
+    html = f"<h1>Performance Dashboard Report</h1>{df_filtered.to_html(index=False)}"
+    pdf_data = generate_pdf(html)
+    if pdf_data:
+        st.download_button("Download PDF", pdf_data, file_name='dashboard_report.pdf', mime='application/pdf')
