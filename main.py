@@ -79,17 +79,24 @@ default_wk = shutil.which('wkhtmltopdf') or ''
 wk_path = st.sidebar.text_input("Path to wkhtmltopdf:", default_wk, help="Install wkhtmltopdf and provide its path if not auto-detected.")
 
 # Load uploads
-# Note: no leading spaces before df_uploads
-
 df_uploads = pd.read_sql(
     'SELECT id, filename, uploader, file_type, category, timestamp FROM uploads ORDER BY timestamp DESC',
     conn
 )
+# Handle no submissions
+if df_uploads.empty:
+    if is_admin:
+        st.info("No submissions yet. Please use the Upload Excel control to add data.")
+        # Only show upload controls for admin
+    else:
+        st.warning("No submissions available.")
+    st.stop()
+
 scope_options = ['All uploads'] + df_uploads.apply(
     lambda x: f"{x.id} - {x.filename} [{x.file_type}/{x.category}] by {x.uploader}@{x.timestamp}", axis=1
 ).tolist()
 selection = st.sidebar.selectbox("Select upload scope", scope_options)
-sel_id = None if selection.startswith('All') else int(selection.split(' - ')[0])
+sel_id = None if selection.startswith('All') else int(selection.split(' - ')[0])('All') else int(selection.split(' - ')[0])
 
 # Admin: delete submissions
 if is_admin:
