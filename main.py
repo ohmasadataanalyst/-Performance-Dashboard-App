@@ -45,7 +45,7 @@ view_only = ["mohamed emad", "mohamed houider", "sujan podel", "ali ismail", "is
 
 # Streamlit config
 st.set_page_config(page_title="Performance Dashboard", layout="wide")
-st.title("📊 Performance Dashboard with SQLite Storage")
+st.title("📊 classic Dashboard for performance")
 
 # Authentication
 user = st.text_input("Enter your full name:").strip().lower()
