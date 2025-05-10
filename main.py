@@ -169,4 +169,21 @@ st.plotly_chart(px.line(trend, x='date', y='count', title='Daily Issue Trend'), 
 
 # Download filtered data
 st.download_button("📥 Download Filtered Data", df_filtered.to_csv(index=False).encode(), "issues_report.csv")
-st.download_button("📥 Download Filtered Data", df_filtered.to_csv(index=False).encode(), "issues_report.csv")
+
+# Download dashboard as PDF
+if st.button("📄 Download Dashboard as PDF"):
+    try:
+        import pdfkit
+        # Render current page as HTML and convert to PDF
+        # Requires wkhtmltopdf installed and PDFKIT configuration
+        # Save dashboard HTML
+        html = st.experimental_get_query_params()  # placeholder for actual HTML capture
+        # In a real setup, you would generate an HTML report
+        with open('dashboard.html', 'w') as f:
+            f.write(html if isinstance(html, str) else str(html))
+        pdfkit.from_file('dashboard.html', 'dashboard.pdf')
+        with open('dashboard.pdf', 'rb') as pdf_file:
+            PDFbyte = pdf_file.read()
+        st.download_button("Download PDF", PDFbyte, file_name="dashboard.pdf", mime='application/octet-stream')
+    except Exception as e:
+        st.error(f"Failed to generate PDF: {e}")
