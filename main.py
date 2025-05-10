@@ -174,16 +174,23 @@ st.download_button("📥 Download Filtered Data", df_filtered.to_csv(index=False
 if st.button("📄 Download Dashboard as PDF"):
     try:
         import pdfkit
-        # Render current page as HTML and convert to PDF
-        # Requires wkhtmltopdf installed and PDFKIT configuration
-        # Save dashboard HTML
-        html = st.experimental_get_query_params()  # placeholder for actual HTML capture
-        # In a real setup, you would generate an HTML report
+        # Use query_params instead of experimental_get_query_params
+        html_content = str(st.query_params)
+        # Write HTML placeholder
         with open('dashboard.html', 'w') as f:
-            f.write(html if isinstance(html, str) else str(html))
-        pdfkit.from_file('dashboard.html', 'dashboard.pdf')
+            f.write(html_content)
+        # Generate PDF (ensure wkhtmltopdf is installed or configure path)
+        try:
+            pdfkit.from_file('dashboard.html', 'dashboard.pdf')
+        except OSError:
+            # Example of custom wkhtmltopdf path; adjust as needed
+            path_wk = '/usr/local/bin/wkhtmltopdf'
+            config = pdfkit.configuration(wkhtmltopdf=path_wk)
+            pdfkit.from_file('dashboard.html', 'dashboard.pdf', configuration=config)
         with open('dashboard.pdf', 'rb') as pdf_file:
             PDFbyte = pdf_file.read()
-        st.download_button("Download PDF", PDFbyte, file_name="dashboard.pdf", mime='application/octet-stream')
+        st.download_button("Download PDF", PDFbyte, file_name="dashboard.pdf", mime='application/pdf')
     except Exception as e:
-        st.error(f"Failed to generate PDF: {e}")
+        st.error(
+            "Failed to generate PDF. Ensure wkhtmltopdf is installed and accessible. Error: " + str(e)
+        )
