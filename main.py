@@ -58,168 +58,130 @@ if not is_admin and user not in view_only:
     st.error("Unauthorized user.")
     st.stop()
 
-# PDF generator (must be defined before usage)
-def generate_pdf(html, fname='dashboard.pdf', wk_path=None):
+# PDF generator
+def generate_pdf(html, fname='report.pdf', wk_path=None):
     if not wk_path:
-        st.error("Provide wkhtmltopdf path.")
+        st.error("wkhtmltopdf path not set.")
         return None
     try:
         import pdfkit
-        cfg = pdfkit.configuration(wkhtmltopdf=wk_path)
-        pdfkit.from_string(html, fname, configuration=cfg)
+        config = pdfkit.configuration(wkhtmltopdf=wk_path)
+        pdfkit.from_string(html, fname, configuration=config)
         with open(fname, 'rb') as f:
             return f.read()
     except Exception as e:
-        st.error(f"PDF error: {e}")
+        st.error(f"PDF generation error: {e}")
         return None
 
-# Sidebar: filters & wkhtmltopdf path
+# Sidebar: controls
 st.sidebar.header("🔍 Filters & Options")
+# Upload control for admins\if is_admin:
+    file_type = st.sidebar.selectbox("File type", ["opening", "closing", "handover", "meal training"])
+    category = st.sidebar.selectbox("Category", ['operation-training', 'CCTV', 'complaints', 'missing', 'visits', 'meal training'])
+    up = st.sidebar.file_uploader("Upload Excel", type=["xlsx"])
+    if up:
+        data = up.getvalue()
+        ts = datetime.now().isoformat()
+        c.execute('INSERT INTO uploads (filename, uploader, timestamp, file_type, category, file) VALUES (?, ?, ?, ?, ?, ?)',
+                  (up.name, user, ts, file_type, category, sqlite3.Binary(data)))
+        uid = c.lastrowid
+        df_up = pd.read_excel(io.BytesIO(data))
+        df_up.columns = df_up.columns.str.lower()
+        df_up['date'] = pd.to_datetime(df_up['date'], dayfirst=True)
+        for _, row in df_up.iterrows():
+            c.execute('INSERT INTO issues VALUES (?, ?, ?, ?, ?, ?, ?)',
+                      (uid, row['code'], row['issues'], row['branch'], row['area manager'], row['date'].isoformat(), file_type))
+        conn.commit()
+        st.sidebar.success(f"Uploaded {up.name} ({len(df_up)} records)")
+
+# wkhtmltopdf path
 default_wk = shutil.which('wkhtmltopdf') or ''
-wk_path = st.sidebar.text_input("Path to wkhtmltopdf:", default_wk, help="Install wkhtmltopdf and provide its path if not auto-detected.")
+wk_path = st.sidebar.text_input("wkhtmltopdf path:", default_wk)
 
 # Load uploads
-df_uploads = pd.read_sql(
-    'SELECT id, filename, uploader, file_type, category, timestamp FROM uploads ORDER BY timestamp DESC',
-    conn
-)
-# Handle no submissions
-if df_uploads.empty:
-    if is_admin:
-        st.info("No submissions yet. Please use the Upload Excel control to add data.")
-        # Only show upload controls for admin
-    else:
-        st.warning("No submissions available.")
-    st.stop()
+df_uploads = pd.read_sql('SELECT id, filename, uploader, timestamp FROM uploads ORDER BY timestamp DESC', conn)
 
-scope_options = ['All uploads'] + df_uploads.apply(
-    lambda x: f"{x.id} - {x.filename} [{x.file_type}/{x.category}] by {x.uploader}@{x.timestamp}", axis=1
-).tolist()
-selection = st.sidebar.selectbox("Select upload scope", scope_options)
-sel_id = None if selection.startswith('All') else int(selection.split(' - ')[0])('All') else int(selection.split(' - ')[0])
+# Scope selection
+scope_opts = ['All uploads'] + df_uploads['id'].astype(str).tolist()
+sel = st.sidebar.selectbox("Select upload ID:", scope_opts)
+sel_id = None if sel == 'All uploads' else int(sel)
 
-# Admin: delete submissions
-if is_admin:
-    st.sidebar.markdown("---")
-    # Provide dropdown of upload IDs for deletion
-    del_options = ['Select ID to delete'] + df_uploads['id'].astype(str).tolist()
-    del_choice = st.sidebar.selectbox("🗑️ Delete Submission ID:", del_options)
-    if del_choice != 'Select ID to delete':
-        del_id = int(del_choice)
-        if st.sidebar.button(f"Confirm Delete #{del_id}"):
-            # Remove issues and upload record
-            c.execute('DELETE FROM issues WHERE upload_id=?', (del_id,))
-            c.execute('DELETE FROM uploads WHERE id=?', (del_id,))
-            conn.commit()
-            st.sidebar.success(f"Submission {del_id} deleted.")
-            st.experimental_rerun()
-
-# Fetch issues
-def load_issues(uid=None):
-    sql = ('SELECT issues.*, u.category, u.uploader '
-           'FROM issues JOIN uploads u ON u.id=issues.upload_id')
-    params = ()
-    if uid:
-        sql += ' WHERE upload_id=?'
-        params = (uid,)
-    return pd.read_sql(sql, conn, params=params, parse_dates=['date'])
-
-df = load_issues(sel_id)
+# Branch & Category filters
+# Fetch data
+sql = 'SELECT i.*, u.category FROM issues i JOIN uploads u ON u.id = i.upload_id'
+params = []
+if sel_id:
+    sql += ' WHERE upload_id = ?'
+    params.append(sel_id)
+df = pd.read_sql(sql, conn, params=params, parse_dates=['date'])
 if df.empty:
     st.warning("No data to display.")
     st.stop()
+df['date'] = pd.to_datetime(df['date'])
 
-# Date filter
-min_d, max_d = df['date'].min().date(), df['date'].max().date()
-start_end = st.sidebar.date_input("Date range", [min_d, max_d])
-if len(start_end) != 2:
-    st.error("Select both start and end date.")
-    st.stop()
-start_date = datetime.combine(start_end[0], datetime.min.time())
-end_date = datetime.combine(start_end[1], datetime.max.time())
-
-# Category & branch filters
-categories = df['category'].unique().tolist()
-b_branches = df['branch'].unique().tolist()
-sel_cats = st.sidebar.multiselect("Category", categories, default=categories)
-sel_branches = st.sidebar.multiselect("Branch", b_branches, default=b_branches)
+date_range = st.sidebar.date_input("Date range:", [df['date'].min().date(), df['date'].max().date()])
+branch_opts = df['branch'].unique().tolist()
+cat_opts = df['category'].unique().tolist()
+sel_br = st.sidebar.multiselect("Branch:", branch_opts, default=branch_opts)
+sel_cat = st.sidebar.multiselect("Category:", cat_opts, default=cat_opts)
 
 # Apply filters
-df_filtered = df[
-    (df['date'] >= start_date) & (df['date'] <= end_date) &
-    df['category'].isin(sel_cats) & df['branch'].isin(sel_branches)
-]
+mask = (df['branch'].isin(sel_br)) & (df['category'].isin(sel_cat)) & \
+       (df['date'].dt.date >= date_range[0]) & (df['date'].dt.date <= date_range[1])
+df_f = df.loc[mask]
 
-# Dashboard header
-st.subheader(f"Issues: {start_end[0]} to {start_end[1]}")
-st.write(f"Total issues: {len(df_filtered)}")
+# Dashboard
+st.subheader(f"Issues from {date_range[0]} to {date_range[1]}")
+st.write(f"Total: {len(df_f)}")
 
-# Build figures list
-figs = []
-# Branch bar
-b_sum = df_filtered.groupby('branch').size().reset_index(name='total')
-fig_branch = px.bar(b_sum, x='branch', y='total', title='Issues per Branch')
-st.plotly_chart(fig_branch, use_container_width=True)
-figs.append(('Issues per Branch', fig_branch))
-# Area manager pie
-am_sum = df_filtered.groupby('area_manager').size().reset_index(name='total')
-fig_am = px.pie(am_sum, names='area_manager', values='total', title='Issues by Area Manager')
-st.plotly_chart(fig_am, use_container_width=True)
-figs.append(('Issues by Area Manager', fig_am))
-# Report type bar
-rt_sum = df_filtered.groupby('report_type').size().reset_index(name='total')
-fig_rt = px.bar(rt_sum, x='report_type', y='total', title='Issues by Report Type')
-st.plotly_chart(fig_rt, use_container_width=True)
-figs.append(('Issues by Report Type', fig_rt))
-# Category bar
-cat_sum = df_filtered.groupby('category').size().reset_index(name='total')
-fig_cat = px.bar(cat_sum, x='category', y='total', title='Issues by Category')
-st.plotly_chart(fig_cat, use_container_width=True)
-figs.append(('Issues by Category', fig_cat))
-# Trend line
-trend = df_filtered.groupby(df_filtered['date'].dt.date).size().reset_index(name='count')
-fig_trend = px.line(trend, x='date', y='count', title='Daily Trend')
-st.plotly_chart(fig_trend, use_container_width=True)
-figs.append(('Daily Trend', fig_trend))
+# Charts
+figs = {}
+figs['Branch'] = px.bar(df_f.groupby('branch').size().reset_index(name='count'), x='branch', y='count', title='By Branch')
+st.plotly_chart(figs['Branch'], use_container_width=True)
 
-# Detailed records for single-day
-if (end_date.date() - start_date.date()).days == 0:
+figs['Area Manager'] = px.pie(df_f.groupby('area_manager').size().reset_index(name='count'), names='area_manager', values='count', title='By Area Manager')
+st.plotly_chart(figs['Area Manager'], use_container_width=True)
+
+figs['Report Type'] = px.bar(df_f.groupby('report_type').size().reset_index(name='count'), x='report_type', y='count', title='By Report Type')
+st.plotly_chart(figs['Report Type'], use_container_width=True)
+
+figs['Category'] = px.bar(df_f.groupby('category').size().reset_index(name='count'), x='category', y='count', title='By Category')
+st.plotly_chart(figs['Category'], use_container_width=True)
+
+# Detailed for single day
+if date_range[0] == date_range[1]:
     st.subheader("Detailed Records")
-    st.dataframe(df_filtered)
+    st.dataframe(df_f)
 
-# Top issues
+# Top issues & Trend
 st.subheader("Top Issues")
-st.dataframe(
-    df_filtered['issues']
-        .value_counts()
-        .rename_axis('issue')
-        .reset_index(name='count')
-        .head(20)
-)
+st.dataframe(df_f['issues'].value_counts().head(20).rename_axis('issue').reset_index(name='count'))
 
-# Download data
-st.download_button("📥 Download Data CSV", df_filtered.to_csv(index=False).encode(), "issues.csv")
+figs['Trend'] = px.line(df_f.groupby(df_f['date'].dt.date).size().reset_index(name='count'), x='date', y='count', title='Trend')
+    
+st.plotly_chart(figs['Trend'], use_container_width=True)
+
+# Downloads
+st.download_button("Download CSV", df_f.to_csv(index=False).encode(), "issues.csv")
 
 # Download visuals as PDF
-if st.button("📥 Download Visuals as PDF"):
+if st.button("Download Visuals PDF"):
     if not wk_path:
-        st.error("Provide wkhtmltopdf path.")
+        st.error("wkhtmltopdf path not set.")
     else:
-        html_parts = ["<html><body>"]
-        for title, fig in figs:
-            buf = io.BytesIO()
-            fig.write_image(buf, format='png')
-            b64 = base64.b64encode(buf.getvalue()).decode()
-            html_parts.append(f"<h2>{title}</h2><img src='data:image/png;base64,{b64}'/><br/>")
-        html_parts.append("</body></html>")
-        html_content = ''.join(html_parts)
-        pdf_bytes = generate_pdf(html_content, fname='visuals.pdf', wk_path=wk_path)
-        if pdf_bytes:
-            st.download_button("Download Visuals PDF", pdf_bytes, "visuals.pdf", "application/pdf")
+        html = '<html><body>'
+        for title, fig in figs.items():
+            img = fig.to_image(format='png')
+            b64 = base64.b64encode(img).decode()
+            html += f"<h2>{title}</h2><img src='data:image/png;base64,{b64}'/><br/>"
+        html += '</body></html>'
+        pdf = generate_pdf(html, fname='visuals.pdf', wk_path=wk_path)
+        if pdf:
+            st.download_button("Download Visuals PDF", pdf, "visuals.pdf", "application/pdf")
 
-# Download full report PDF
-if st.button("📄 Download Dashboard as PDF"):
-    html = f"<h1>Dashboard Report</h1>{df_filtered.to_html(index=False)}"
-    pdf = generate_pdf(html, wk_path=wk_path)
-    if pdf:
-        st.download_button("Download PDF", pdf, "dashboard.pdf", "application/pdf")
+# Download full PDF
+if st.button("Download Dashboard PDF"):
+    html_full = df_f.to_html(index=False)
+    pdf_full = generate_pdf(f"<h1>Dashboard Report</h1>{html_full}", wk_path=wk_path)
+    if pdf_full:
+        st.download_button("Download Dashboard PDF", pdf_full, "dashboard.pdf", "application/pdf")
