@@ -35,7 +35,8 @@ if username:
             if expected.issubset(df.columns.str.lower()):
                 # Standardize column names
                 df.columns = df.columns.str.lower()
-                df['date'] = pd.to_datetime(df['date'], dayfirst=False)
+                # Parse dates assuming day-first format (e.g., 10/5/2025 = 10 May 2025)
+df['date'] = pd.to_datetime(df['date'], dayfirst=True)
 
                 # Sidebar filters
                 st.sidebar.header("🛠️ Filters")
