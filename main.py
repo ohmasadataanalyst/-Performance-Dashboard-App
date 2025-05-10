@@ -91,16 +91,20 @@ scope_options = ['All uploads'] + df_uploads.apply(
 selection = st.sidebar.selectbox("Select upload scope", scope_options)
 sel_id = None if selection.startswith('All') else int(selection.split(' - ')[0])
 
-# Admin: delete a specific upload and its issues
+# Admin: delete submissions
 if is_admin:
     st.sidebar.markdown("---")
-    if sel_id is not None:
-        if st.sidebar.button(f"🗑️ Delete Submission #{sel_id}"):
+    # Provide dropdown of upload IDs for deletion
+    del_options = ['Select ID to delete'] + df_uploads['id'].astype(str).tolist()
+    del_choice = st.sidebar.selectbox("🗑️ Delete Submission ID:", del_options)
+    if del_choice != 'Select ID to delete':
+        del_id = int(del_choice)
+        if st.sidebar.button(f"Confirm Delete #{del_id}"):
             # Remove issues and upload record
-            c.execute('DELETE FROM issues WHERE upload_id=?', (sel_id,))
-            c.execute('DELETE FROM uploads WHERE id=?', (sel_id,))
+            c.execute('DELETE FROM issues WHERE upload_id=?', (del_id,))
+            c.execute('DELETE FROM uploads WHERE id=?', (del_id,))
             conn.commit()
-            st.sidebar.success(f"Submission {sel_id} deleted.")
+            st.sidebar.success(f"Submission {del_id} deleted.")
             st.experimental_rerun()
 
 # Fetch issues
