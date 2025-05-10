@@ -188,12 +188,15 @@ if st.button("📥 Download Visuals"):
     buf = io.BytesIO()
     with ZipFile(buf, 'w') as zipf:
         for name, fig in figs:
-            img = pio.to_image(fig, format='png')
-            zipf.writestr(f"{name}.png", img)
+            # Use Plotly's write_image (requires kaleido in requirements.txt)
+            img_buf = io.BytesIO()
+            fig.write_image(img_buf, format='png')
+            img_buf.seek(0)
+            zipf.writestr(f"{name}.png", img_buf.read())
     buf.seek(0)
     st.download_button("Download Visuals ZIP", buf.getvalue(), "visuals.zip", mime="application/zip")
 
-# PDF export (optional)
+# PDF export (optional) (optional)
 def generate_pdf(html, fname='dashboard.pdf'):
     if not wk_path:
         st.error("Provide wkhtmltopdf path.")
