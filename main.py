@@ -12,7 +12,7 @@ from datetime import datetime
 DB_PATH = 'issues.db'
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 c = conn.cursor()
-# Create tables
+# Create tables (idempotent)
 c.execute('''CREATE TABLE IF NOT EXISTS uploads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     filename TEXT,
@@ -45,63 +45,65 @@ view_only = ["mohamed emad", "mohamed houider", "sujan podel", "ali ismail", "is
 
 # Streamlit config
 st.set_page_config(page_title="Performance Dashboard", layout="wide")
-st.title("📊 Classic Dashboard for Performance")
+# Title will be conditional based on auth
 
-# --- MODIFIED AUTHENTICATION LOGIC ---
-# Initialize session state variables if they don't exist
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-if 'user_role' not in st.session_state:
-    st.session_state.user_role = None
-if 'user_name' not in st.session_state:
-    st.session_state.user_name = None
+# --- REVISED AUTHENTICATION FUNCTION ---
+def check_login():
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+        st.session_state.user_name = None
+        st.session_state.user_role = None
 
-# If not authenticated, show login form
-if not st.session_state.authenticated:
-    st.subheader("Login")
-    user_input = st.text_input("Enter your full name:", key="login_user").strip().lower()
-    pwd_input = st.text_input("Enter your password:", type="password", key="login_pwd")
-    
-    if st.button("Login", key="login_button"):
-        login_success = False
-        if user_input in db_admin and bcrypt.checkpw(pwd_input.encode(), db_admin[user_input]):
-            st.session_state.authenticated = True
-            st.session_state.user_role = 'admin'
-            st.session_state.user_name = user_input
-            login_success = True
-        elif user_input in view_only:
-            # Basic password check for view_only (replace with secure check if needed)
-            if pwd_input: # Example: any non-empty password
-                st.session_state.authenticated = True
-                st.session_state.user_role = 'view_only'
-                st.session_state.user_name = user_input
-                login_success = True
-            else:
-                st.error("Password cannot be empty for view-only users.")
+    if not st.session_state.authenticated:
+        st.title("📊 Login - Performance Dashboard")
+        st.subheader("Please log in to continue")
         
-        if login_success:
-            st.rerun() # Rerun to hide login form and show main app
-        elif user_input or pwd_input: # Only show error if they attempted login
-            st.error("Invalid credentials. Please try again.")
-    else:
-        # Show a message or just stop if they haven't clicked login yet
-        # st.info("Please enter your credentials to access the dashboard.")
-        st.stop() # Stop execution if not authenticated and no login attempt yet
-else:
-    # User is authenticated, show sidebar welcome and logout
-    st.sidebar.success(f"Logged in as: {st.session_state.user_name.title()} ({st.session_state.user_role})")
-    if st.sidebar.button("Logout", key="logout_button"):
-        # Clear all session state keys related to auth
-        keys_to_clear = ['authenticated', 'user_role', 'user_name']
-        for key in keys_to_clear:
-            if key in st.session_state:
-                del st.session_state[key]
-        st.rerun() # Rerun to show login form again
+        with st.form("login_form"):
+            username = st.text_input("Full Name:", key="auth_username").strip().lower()
+            password = st.text_input("Password:", type="password", key="auth_password")
+            submitted = st.form_submit_button("Login")
 
-# Proceed with the rest of the app only if authenticated
+            if submitted:
+                login_attempted = True
+                if username in db_admin and bcrypt.checkpw(password.encode(), db_admin[username]):
+                    st.session_state.authenticated = True
+                    st.session_state.user_name = username
+                    st.session_state.user_role = 'admin'
+                    st.rerun() # Crucial for state to update and redraw
+                elif username in view_only:
+                    # Simplified view-only auth, ensure password field is not empty
+                    if password: 
+                        st.session_state.authenticated = True
+                        st.session_state.user_name = username
+                        st.session_state.user_role = 'view_only'
+                        st.rerun() # Crucial
+                    else:
+                        st.error("Password cannot be empty for view-only users.")
+                elif username or password : # Only show error if an attempt was made
+                     st.error("Invalid username or password.")
+                else:
+                    st.info("Please enter your credentials.")
+        return False # Not authenticated, stop further script execution
+    return True # Authenticated
+
+if not check_login():
+    st.stop() # Stop the rest of the script if not authenticated
+
+# --- User is Authenticated, Proceed with App ---
+st.title("📊 Classic Dashboard for Performance") # Show title now
+st.sidebar.success(f"Logged in as: {st.session_state.user_name.title()} ({st.session_state.user_role})")
+if st.sidebar.button("Logout", key="logout_button_main"):
+    st.session_state.authenticated = False
+    st.session_state.user_name = None
+    st.session_state.user_role = None
+    # Clear other potentially sensitive session state if necessary
+    # for key in list(st.session_state.keys()):
+    #     del st.session_state[key]
+    st.rerun()
+
 is_admin = st.session_state.user_role == 'admin'
 current_user = st.session_state.user_name
-# --- END OF MODIFIED AUTHENTICATION LOGIC ---
+# --- END OF REVISED AUTHENTICATION ---
 
 
 # PDF generator
@@ -223,13 +225,15 @@ min_date = df['date'].min().date() if not df.empty else datetime.today().date()
 max_date = df['date'].max().date() if not df.empty else datetime.today().date()
 
 date_range_val = [min_date, max_date]
-if 'date_range_filter' in st.session_state and len(st.session_state.date_range_filter) == 2:
-    if st.session_state.date_range_filter[0] >= min_date and st.session_state.date_range_filter[1] <= max_date:
-        date_range_val = st.session_state.date_range_filter
+# Simplified date range persistence - rely on Streamlit's default widget state persistence
+# if 'date_range_filter' in st.session_state and len(st.session_state.date_range_filter) == 2:
+#     if st.session_state.date_range_filter[0] >= min_date and st.session_state.date_range_filter[1] <= max_date:
+#         date_range_val = st.session_state.date_range_filter
 
 date_range = st.sidebar.date_input("Date range:", value=date_range_val, min_value=min_date, max_value=max_date, key="date_range_filter")
-if not date_range or len(date_range) != 2:
+if not date_range or len(date_range) != 2: # Should not happen with date_input if correctly used
     date_range = [min_date, max_date]
+
 
 branch_opts = ['All'] + sorted(df['branch'].unique().tolist())
 sel_br = st.sidebar.multiselect("Branch:", branch_opts, default=['All'], key="branch_filter")
@@ -242,7 +246,7 @@ sel_ft = st.sidebar.multiselect("File Type (Report Type):", file_type_filter_opt
 
 # Apply filters
 df_f = df.copy()
-if date_range and len(date_range) == 2:
+if date_range and len(date_range) == 2: # date_range from date_input is always a tuple of 2
     df_f = df_f[(df_f['date'].dt.date >= date_range[0]) & (df_f['date'].dt.date <= date_range[1])]
 
 if 'All' not in sel_br:
@@ -359,16 +363,8 @@ if st.sidebar.button("Prepare Visuals PDF", key="prep_visuals_pdf"):
         
         chart_titles_in_order = ["Branch", "Area Manager", "Report Type", "Category", "Trend"]
         
-        # Logic for temporary image saving (mostly for debugging, can be removed later)
-        current_run_id = None
-        try:
-            # For newer Streamlit versions
-            from streamlit.runtime.scriptrunner import get_script_run_ctx
-            ctx = get_script_run_ctx()
-            if ctx:
-                current_run_id = ctx.id
-        except ImportError:
-            pass # Older Streamlit, simple session state flag will work less effectively for re-saving
+        if 'branch_image_saved_this_action' not in st.session_state: # Initialize flag for test image
+            st.session_state.branch_image_saved_this_action = False
 
         for title in chart_titles_in_order:
             if title in figs:
@@ -376,19 +372,11 @@ if st.sidebar.button("Prepare Visuals PDF", key="prep_visuals_pdf"):
                 try:
                     img_bytes = fig.to_image(format='png', engine='kaleido', scale=2)
                     
-                    # Refined logic for saving test image only once per actual "Prepare PDF" action
-                    # This part is mainly for debugging the image color itself.
-                    if title == "Branch":
-                        # A simple way to make sure we save it once after a "Prepare PDF" click
-                        # We'll use a session_state flag that's reset if the PDF isn't prepared yet
-                        if not st.session_state.get('pdf_visuals_data_being_prepared', False):
-                            st.session_state.branch_image_saved_this_action = False 
-                        
-                        if not st.session_state.get('branch_image_saved_this_action', False):
-                            with open("test_chart_image_branch.png", "wb") as f_img:
-                                f_img.write(img_bytes)
-                            st.sidebar.info("Saved/Re-saved 'test_chart_image_branch.png'.")
-                            st.session_state.branch_image_saved_this_action = True
+                    if title == "Branch" and not st.session_state.branch_image_saved_this_action:
+                        with open("test_chart_image_branch.png", "wb") as f_img:
+                            f_img.write(img_bytes)
+                        st.sidebar.info("Saved/Re-saved 'test_chart_image_branch.png'.")
+                        st.session_state.branch_image_saved_this_action = True # Prevent re-saving in same PDF prep
 
                     b64_img = base64.b64encode(img_bytes).decode()
                     html += f"<h2>{title}</h2><img src='data:image/png;base64,{b64_img}' alt='{title}'/>"
@@ -396,14 +384,12 @@ if st.sidebar.button("Prepare Visuals PDF", key="prep_visuals_pdf"):
                     st.sidebar.warning(f"Could not convert figure '{title}' to image: {e}. Ensure 'kaleido' is installed.")
         html += '</body></html>'
         
-        st.session_state.pdf_visuals_data_being_prepared = True # Flag before calling generate_pdf
         pdf_content = generate_pdf(html, fname='visuals_report.pdf', wk_path=wk_path)
-        st.session_state.pdf_visuals_data_being_prepared = False # Reset flag
+        st.session_state.branch_image_saved_this_action = False # Reset for next PDF prep
 
         if pdf_content:
             st.session_state.pdf_visuals_data = pdf_content
             st.sidebar.success("Visuals PDF is ready for download.")
-            st.session_state.branch_image_saved_this_action = False # Allow saving again on next "Prepare"
         else:
             if 'pdf_visuals_data' in st.session_state:
                 del st.session_state.pdf_visuals_data
