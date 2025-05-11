@@ -102,19 +102,26 @@ def generate_pdf(html, fname='report.pdf', wk_path=None):
     try:
         import pdfkit
         config = pdfkit.configuration(wkhtmltopdf=wk_path)
+        
+        # --- MODIFIED OPTIONS for unpatched wkhtmltopdf ---
         options = {
             'enable-local-file-access': None,
-            'print-media-type': None,       # Use screen styles (important for colors)
-            'background': None,             # Render background colors/images
-            'no-grayscale': None,           # Explicitly disable grayscale
-            'images': None,                 # Ensure images are loaded
+            # 'print-media-type': None,       # Removed - unsupported by unpatched Qt
+            'background': None,             # Keep, might work or be ignored, generally safe
+            # 'no-grayscale': None,           # Removed - unknown argument
+            'images': None,
             'encoding': "UTF-8",
             'load-error-handling': 'ignore',
             'load-media-error-handling': 'ignore',
-            'disable-smart-shrinking': None,
-            'zoom': 0.8, # Adjust zoom to fit content better if needed
-            'page-size': 'A4', # Optional: set page size
+            'disable-smart-shrinking': None, # This might also be unsupported, test
+            'zoom': 0.8,
+            'page-size': 'A4',
         }
+        # If you still want to try forcing color (and it defaults to it anyway if --grayscale isn't used)
+        # you might not need any specific color option.
+        # If it still comes out grayscale, your wkhtmltopdf might default to it for some reason
+        # or the content itself is styled that way.
+
         pdfkit.from_string(html, fname, configuration=config, options=options)
         with open(fname, 'rb') as f:
             return f.read()
@@ -122,9 +129,8 @@ def generate_pdf(html, fname='report.pdf', wk_path=None):
         st.error(f"wkhtmltopdf not found at the specified path: {wk_path}. Please ensure it's installed and the path is correct.")
         return None
     except Exception as e:
-        st.error(f"PDF generation error: {e}")
+        st.error(f"PDF generation error: {e}") # This will show the wkhtmltopdf error output
         return None
-
 # Sidebar: controls
 st.sidebar.header("🔍 Filters & Options")
 
