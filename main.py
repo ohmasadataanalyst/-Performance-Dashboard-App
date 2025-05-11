@@ -47,7 +47,8 @@ view_only = ["mohamed emad", "mohamed houider", "sujan podel", "ali ismail", "is
 st.set_page_config(page_title="Performance Dashboard", layout="wide")
 st.title("📊 Classic Dashboard for Performance")
 
-# Authentication
+# --- MODIFIED AUTHENTICATION LOGIC ---
+# Initialize session state variables if they don't exist
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'user_role' not in st.session_state:
@@ -55,38 +56,52 @@ if 'user_role' not in st.session_state:
 if 'user_name' not in st.session_state:
     st.session_state.user_name = None
 
+# If not authenticated, show login form
 if not st.session_state.authenticated:
-    user_input = st.text_input("Enter your full name:").strip().lower()
-    pwd_input = st.text_input("Enter your password:", type="password")
+    st.subheader("Login")
+    user_input = st.text_input("Enter your full name:", key="login_user").strip().lower()
+    pwd_input = st.text_input("Enter your password:", type="password", key="login_pwd")
     
-    if st.button("Login"):
+    if st.button("Login", key="login_button"):
+        login_success = False
         if user_input in db_admin and bcrypt.checkpw(pwd_input.encode(), db_admin[user_input]):
             st.session_state.authenticated = True
             st.session_state.user_role = 'admin'
             st.session_state.user_name = user_input
-            st.rerun()
+            login_success = True
         elif user_input in view_only:
-            if pwd_input: 
+            # Basic password check for view_only (replace with secure check if needed)
+            if pwd_input: # Example: any non-empty password
                 st.session_state.authenticated = True
                 st.session_state.user_role = 'view_only'
                 st.session_state.user_name = user_input
-                st.rerun()
+                login_success = True
             else:
                 st.error("Password cannot be empty for view-only users.")
-        else:
-            st.error("Invalid credentials.")
+        
+        if login_success:
+            st.rerun() # Rerun to hide login form and show main app
+        elif user_input or pwd_input: # Only show error if they attempted login
+            st.error("Invalid credentials. Please try again.")
     else:
-        st.info("Enter credentials to proceed.")
-        st.stop()
+        # Show a message or just stop if they haven't clicked login yet
+        # st.info("Please enter your credentials to access the dashboard.")
+        st.stop() # Stop execution if not authenticated and no login attempt yet
 else:
+    # User is authenticated, show sidebar welcome and logout
     st.sidebar.success(f"Logged in as: {st.session_state.user_name.title()} ({st.session_state.user_role})")
-    if st.sidebar.button("Logout"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+    if st.sidebar.button("Logout", key="logout_button"):
+        # Clear all session state keys related to auth
+        keys_to_clear = ['authenticated', 'user_role', 'user_name']
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun() # Rerun to show login form again
 
+# Proceed with the rest of the app only if authenticated
 is_admin = st.session_state.user_role == 'admin'
 current_user = st.session_state.user_name
+# --- END OF MODIFIED AUTHENTICATION LOGIC ---
 
 
 # PDF generator
@@ -254,14 +269,14 @@ if not df_f.empty:
             branch_data = df_f.groupby('branch').size().reset_index(name='count').sort_values('count', ascending=False)
             if not branch_data.empty:
                 figs['Branch'] = px.bar(branch_data, x='branch', y='count', title='Issues by Branch',
-                                        template="plotly_white") # FORCE COLOR TEMPLATE
+                                        template="plotly_white")
                 st.plotly_chart(figs['Branch'], use_container_width=True)
         
         if 'report_type' in df_f.columns and not df_f['report_type'].empty:
             rt_data = df_f.groupby('report_type').size().reset_index(name='count').sort_values('count', ascending=False)
             if not rt_data.empty:
                 figs['Report Type'] = px.bar(rt_data, x='report_type', y='count', title='Issues by Report Type',
-                                             template="plotly_white") # FORCE COLOR TEMPLATE
+                                             template="plotly_white")
                 st.plotly_chart(figs['Report Type'], use_container_width=True)
 
     with col2:
@@ -269,14 +284,14 @@ if not df_f.empty:
             am_data = df_f.groupby('area_manager').size().reset_index(name='count')
             if not am_data.empty:
                 figs['Area Manager'] = px.pie(am_data, names='area_manager', values='count', title='Issues by Area Manager', hole=0.3,
-                                              template="plotly_white") # FORCE COLOR TEMPLATE
+                                              template="plotly_white")
                 st.plotly_chart(figs['Area Manager'], use_container_width=True)
 
         if 'upload_category' in df_f.columns and not df_f['upload_category'].empty:
             uc_data = df_f.groupby('upload_category').size().reset_index(name='count').sort_values('count', ascending=False)
             if not uc_data.empty:
                 figs['Category'] = px.bar(uc_data, x='upload_category', y='count', title='Issues by Upload Category',
-                                          template="plotly_white") # FORCE COLOR TEMPLATE
+                                          template="plotly_white")
                 st.plotly_chart(figs['Category'], use_container_width=True)
 
     if 'date' in df_f.columns and not df_f['date'].empty:
@@ -284,7 +299,7 @@ if not df_f.empty:
         trend_data = trend_data.sort_values('date')
         if not trend_data.empty:
             figs['Trend'] = px.line(trend_data, x='date', y='count', title='Issues Trend Over Time', markers=True,
-                                    template="plotly_white") # FORCE COLOR TEMPLATE
+                                    template="plotly_white")
             st.plotly_chart(figs['Trend'], use_container_width=True)
 
 # Detailed records
@@ -344,25 +359,36 @@ if st.sidebar.button("Prepare Visuals PDF", key="prep_visuals_pdf"):
         
         chart_titles_in_order = ["Branch", "Area Manager", "Report Type", "Category", "Trend"]
         
+        # Logic for temporary image saving (mostly for debugging, can be removed later)
+        current_run_id = None
+        try:
+            # For newer Streamlit versions
+            from streamlit.runtime.scriptrunner import get_script_run_ctx
+            ctx = get_script_run_ctx()
+            if ctx:
+                current_run_id = ctx.id
+        except ImportError:
+            pass # Older Streamlit, simple session state flag will work less effectively for re-saving
+
         for title in chart_titles_in_order:
             if title in figs:
                 fig = figs[title]
                 try:
                     img_bytes = fig.to_image(format='png', engine='kaleido', scale=2)
                     
-                    if title == "Branch": # Save only the first chart for testing
-                        if 'saved_test_image' not in st.session_state:
-                             with open("test_chart_image_branch.png", "wb") as f_img:
-                                f_img.write(img_bytes)
-                             st.sidebar.info("Saved 'test_chart_image_branch.png'. Check for colors.")
-                             st.session_state.saved_test_image = True
-                        elif st.session_state.get('saved_test_image_run_id', '') != st.runtime.scriptrunner.get_script_run_ctx().id:
-                            # If it's a new run, allow saving again (useful for iterative testing)
+                    # Refined logic for saving test image only once per actual "Prepare PDF" action
+                    # This part is mainly for debugging the image color itself.
+                    if title == "Branch":
+                        # A simple way to make sure we save it once after a "Prepare PDF" click
+                        # We'll use a session_state flag that's reset if the PDF isn't prepared yet
+                        if not st.session_state.get('pdf_visuals_data_being_prepared', False):
+                            st.session_state.branch_image_saved_this_action = False 
+                        
+                        if not st.session_state.get('branch_image_saved_this_action', False):
                             with open("test_chart_image_branch.png", "wb") as f_img:
                                 f_img.write(img_bytes)
-                            st.sidebar.info("Re-saved 'test_chart_image_branch.png' on new run. Check for colors.")
-                            st.session_state.saved_test_image_run_id = st.runtime.scriptrunner.get_script_run_ctx().id
-
+                            st.sidebar.info("Saved/Re-saved 'test_chart_image_branch.png'.")
+                            st.session_state.branch_image_saved_this_action = True
 
                     b64_img = base64.b64encode(img_bytes).decode()
                     html += f"<h2>{title}</h2><img src='data:image/png;base64,{b64_img}' alt='{title}'/>"
@@ -370,10 +396,14 @@ if st.sidebar.button("Prepare Visuals PDF", key="prep_visuals_pdf"):
                     st.sidebar.warning(f"Could not convert figure '{title}' to image: {e}. Ensure 'kaleido' is installed.")
         html += '</body></html>'
         
+        st.session_state.pdf_visuals_data_being_prepared = True # Flag before calling generate_pdf
         pdf_content = generate_pdf(html, fname='visuals_report.pdf', wk_path=wk_path)
+        st.session_state.pdf_visuals_data_being_prepared = False # Reset flag
+
         if pdf_content:
             st.session_state.pdf_visuals_data = pdf_content
             st.sidebar.success("Visuals PDF is ready for download.")
+            st.session_state.branch_image_saved_this_action = False # Allow saving again on next "Prepare"
         else:
             if 'pdf_visuals_data' in st.session_state:
                 del st.session_state.pdf_visuals_data
@@ -418,8 +448,3 @@ if 'pdf_dashboard_data' in st.session_state and st.session_state.pdf_dashboard_d
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Database: {DB_PATH}")
-# For the temporary image saving logic:
-try:
-    import streamlit.runtime.scriptrunner # Try to import for newer Streamlit versions
-except ImportError:
-    pass # Older versions won't have this, the simple session_state flag will have to do
