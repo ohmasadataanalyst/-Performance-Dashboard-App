@@ -6,7 +6,7 @@ import sqlite3
 import io
 import shutil
 import base64
-from datetime import datetime, date # Import date
+from datetime import datetime, date
 
 # --- Database setup ---
 DB_PATH = 'issues.db'
@@ -26,21 +26,22 @@ c.execute('''CREATE TABLE IF NOT EXISTS uploads (
 )''')
 conn.commit()
 
-# Add submission_date column to uploads if it doesn't exist (MORE ROBUST CHECK)
+# Add submission_date column to uploads if it doesn't exist (ROBUST CHECK)
 c.execute("PRAGMA table_info(uploads)")
 existing_columns = [column[1] for column in c.fetchall()]
 if 'submission_date' not in existing_columns:
     try:
         c.execute("ALTER TABLE uploads ADD COLUMN submission_date TEXT") # User-specified effective date
         conn.commit()
-        # Use a session state flag to show this message only once per session after update
-        if 'db_schema_updated_message_shown' not in st.session_state:
-            st.sidebar.info("Database 'uploads' table schema updated. Column 'submission_date' added.")
+        if 'db_schema_updated_message_shown' not in st.session_state: # Show only once
             st.session_state.db_schema_updated_message_shown = True
+            # Defer sidebar message until sidebar is fully rendered to avoid st.exception
+            st.toast("Database 'uploads' table schema updated. Column 'submission_date' added.", icon="ℹ️")
+
     except sqlite3.OperationalError as e:
         st.error(f"CRITICAL DATABASE ERROR: Could not add 'submission_date' column to 'uploads' table: {e}. "
-                 "The application cannot proceed without this. Please check database permissions or delete 'issues.db' and restart.")
-        st.stop() # Stop execution if schema update fails critically.
+                 "The application cannot proceed. Please check DB permissions or delete '{DB_PATH}' and restart.")
+        st.stop()
 
 
 # Create issues table (idempotent)
@@ -123,7 +124,7 @@ current_user = st.session_state.user_name
 
 # PDF generator
 def generate_pdf(html, fname='report.pdf', wk_path=None):
-    if not wk_path or wk_path == "not found": # check for "not found" string
+    if not wk_path or wk_path == "not found":
         st.error("wkhtmltopdf path not set or invalid. Please provide the path in the sidebar.")
         return None
     try:
@@ -149,77 +150,84 @@ st.sidebar.header("🔍 Filters & Options")
 # Upload control for admins
 if is_admin:
     st.sidebar.subheader("Admin Controls")
+    st.sidebar.markdown("Set the parameters below, choose your Excel file, then click 'Upload Data'.")
     file_type_upload = st.sidebar.selectbox("File type for upload", ["opening", "closing", "handover", "meal training"], key="upload_file_type")
     category_upload = st.sidebar.selectbox("Category for upload", ['operation-training', 'CCTV', 'complaints', 'missing', 'visits', 'meal training'], key="upload_category")
     
     effective_report_date = st.sidebar.date_input(
-        "Effective Date of Report:",
+        "**Effective Date of Report:**", # Made label bold
         value=date.today(), 
         key="effective_report_date_upload",
-        help="This date will be used for all issues in the uploaded file."
+        help="Select the date this report should be attributed to. All issues from the uploaded file will use this date."
     )
 
-    up = st.sidebar.file_uploader("Upload Excel", type=["xlsx"], key="excel_uploader")
+    up = st.sidebar.file_uploader("Upload Excel File (.xlsx)", type=["xlsx"], key="excel_uploader")
     upload_btn = st.sidebar.button("Upload Data", key="upload_data_button")
 
-    if up and upload_btn and effective_report_date: 
-        data = up.getvalue()
-        ts = datetime.now().isoformat() # Actual system timestamp of upload
-        effective_date_str = effective_report_date.isoformat() # YYYY-MM-DD string
+    if upload_btn: # Process on button click
+        if up and effective_report_date: 
+            data = up.getvalue()
+            ts = datetime.now().isoformat() 
+            effective_date_str = effective_report_date.isoformat() 
 
-        # Check for duplicates based on filename, uploader, type, category, AND effective_date
-        c.execute('SELECT COUNT(*) FROM uploads WHERE filename=? AND uploader=? AND file_type=? AND category=? AND submission_date=?',
-                  (up.name, current_user, file_type_upload, category_upload, effective_date_str))
-        
-        if c.fetchone()[0] == 0:
-            # Insert into uploads table
-            c.execute(
-                'INSERT INTO uploads (filename, uploader, timestamp, file_type, category, submission_date, file) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                (up.name, current_user, ts, file_type_upload, category_upload, effective_date_str, sqlite3.Binary(data))
-            )
-            uid = c.lastrowid
-            try:
-                df_up = pd.read_excel(io.BytesIO(data))
-                df_up.columns = [col.strip().lower() for col in df_up.columns]
-                
-                required_cols = ['code', 'issues', 'branch', 'area manager', 'date'] # 'date' is from Excel
-                missing_cols = [col for col in required_cols if col not in df_up.columns]
+            # TEMPORARY DEBUG MESSAGE
+            st.sidebar.info(f"Debug: Attempting upload for Effective Date: {effective_date_str}")
 
-                if missing_cols:
-                    st.sidebar.error(f"Excel missing columns: {', '.join(missing_cols)}. Upload aborted.")
-                    c.execute('DELETE FROM uploads WHERE id=?', (uid,)) # Rollback upload record
-                    conn.commit()
-                else:
-                    # Validate dates FROM EXCEL, but these are NOT the dates stored in issues.date
-                    # This step is for data integrity of the source file.
-                    df_up['excel_date_validated'] = pd.to_datetime(df_up['date'], dayfirst=True, errors='coerce')
-                    original_len = len(df_up)
-                    df_up.dropna(subset=['excel_date_validated'], inplace=True)
+            c.execute('SELECT COUNT(*) FROM uploads WHERE filename=? AND uploader=? AND file_type=? AND category=? AND submission_date=?',
+                      (up.name, current_user, file_type_upload, category_upload, effective_date_str))
+            
+            if c.fetchone()[0] == 0:
+                c.execute(
+                    'INSERT INTO uploads (filename, uploader, timestamp, file_type, category, submission_date, file) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    (up.name, current_user, ts, file_type_upload, category_upload, effective_date_str, sqlite3.Binary(data))
+                )
+                uid = c.lastrowid
+                # Confirm effective date used for this upload ID
+                st.sidebar.info(f"Debug: Upload ID {uid} will use effective_date_str: {effective_date_str}") 
+                try:
+                    df_up = pd.read_excel(io.BytesIO(data))
+                    df_up.columns = [col.strip().lower() for col in df_up.columns]
                     
-                    rows_dropped = original_len - len(df_up)
-                    if rows_dropped > 0:
-                        st.sidebar.warning(f"{rows_dropped} rows dropped from Excel due to invalid date format in its 'date' column.")
+                    required_cols = ['code', 'issues', 'branch', 'area manager', 'date'] 
+                    missing_cols = [col for col in required_cols if col not in df_up.columns]
 
-                    if df_up.empty:
-                        st.sidebar.error("No valid data rows to process after Excel's 'date' column validation. Upload aborted.")
-                        c.execute('DELETE FROM uploads WHERE id=?', (uid,)) # Rollback upload record
+                    if missing_cols:
+                        st.sidebar.error(f"Excel missing columns: {', '.join(missing_cols)}. Upload aborted.")
+                        c.execute('DELETE FROM uploads WHERE id=?', (uid,)) 
                         conn.commit()
                     else:
-                        # Insert into issues table, using effective_date_str for the 'date' column
-                        for _, row in df_up.iterrows():
-                            c.execute('INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                                    (uid, row['code'], row['issues'], row['branch'], row['area manager'],
-                                     effective_date_str, # Using the user-specified effective date
-                                     file_type_upload)) # Using the file_type selected for the whole upload
-                        conn.commit()
-                        st.sidebar.success(f"Uploaded '{up.name}' ({len(df_up)} records) with Effective Report Date: {effective_report_date.strftime('%Y-%m-%d')}")
-                        st.rerun() # Rerun to update lists and potentially dashboard
-            except Exception as e:
-                st.sidebar.error(f"Error processing Excel file '{up.name}': {e}. Upload rolled back.")
-                c.execute('DELETE FROM uploads WHERE id=?', (uid,)) # Rollback upload record
-                conn.commit()
+                        df_up['excel_date_validated'] = pd.to_datetime(df_up['date'], dayfirst=True, errors='coerce')
+                        original_len = len(df_up)
+                        df_up.dropna(subset=['excel_date_validated'], inplace=True)
+                        
+                        rows_dropped = original_len - len(df_up)
+                        if rows_dropped > 0:
+                            st.sidebar.warning(f"{rows_dropped} rows dropped from Excel due to invalid date format in its 'date' column.")
+
+                        if df_up.empty:
+                            st.sidebar.error("No valid data rows in Excel after 'date' column validation. Upload aborted.")
+                            c.execute('DELETE FROM uploads WHERE id=?', (uid,)) 
+                            conn.commit()
+                        else:
+                            for _, row in df_up.iterrows():
+                                c.execute('INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                                        (uid, row['code'], row['issues'], row['branch'], row['area manager'],
+                                         effective_date_str, 
+                                         file_type_upload))
+                            conn.commit()
+                            st.sidebar.success(f"Uploaded '{up.name}' ({len(df_up)} records) with Effective Report Date: {effective_report_date.strftime('%Y-%m-%d')}")
+                            st.rerun() 
+                except Exception as e:
+                    st.sidebar.error(f"Error processing Excel file '{up.name}': {e}. Upload rolled back.")
+                    c.execute('DELETE FROM uploads WHERE id=?', (uid,)) 
+                    conn.commit()
+            else:
+                st.sidebar.warning(f"Duplicate: File '{up.name}' by '{current_user}' (type '{file_type_upload}', category '{category_upload}', effective date '{effective_date_str}') already uploaded.")
         else:
-            st.sidebar.warning(f"A file named '{up.name}' by '{current_user}' of type '{file_type_upload}' in category '{category_upload}' for effective date '{effective_date_str}' has already been uploaded.")
+            if not up:
+                st.sidebar.error("Please select an Excel file to upload.")
+            if not effective_report_date: # Should not happen with st.date_input
+                st.sidebar.error("Effective Report Date is missing. Please select a date.")
 
 
 # wkhtmltopdf path
@@ -227,15 +235,15 @@ default_wk = shutil.which('wkhtmltopdf') or 'not found'
 wk_path = st.sidebar.text_input("wkhtmltopdf path:", default_wk, help="Path to wkhtmltopdf executable. Required for PDF export.")
 
 # Load uploads for selection and deletion
+# Order by submission_date (effective date) first, then by actual upload timestamp
 df_uploads = pd.read_sql('SELECT id, filename, uploader, timestamp, file_type, category, submission_date FROM uploads ORDER BY submission_date DESC, timestamp DESC', conn)
 
 def format_display_date(date_val_str):
     if pd.isna(date_val_str) or date_val_str is None:
         return "N/A"
     try:
-        # Assuming date_val_str is already 'YYYY-MM-DD' or similar from DB
         return datetime.strptime(str(date_val_str), '%Y-%m-%d').strftime('%Y-%m-%d')
-    except ValueError: # If it's not in the expected format, or some other issue
+    except ValueError: 
         return str(date_val_str) 
 
 df_uploads['display_submission_date'] = df_uploads['submission_date'].apply(format_display_date)
@@ -270,7 +278,8 @@ if is_admin:
     
     if del_choice_display != 'Select ID to Delete':
         del_id = int(del_choice_display.split(' - ')[0])
-        if st.sidebar.button(f"Confirm Delete Submission #{del_id}", key=f"confirm_del_{del_id}_{del_id}", type="primary"): # Unique key
+        # Make delete button key unique to avoid conflicts if list changes
+        if st.sidebar.button(f"Confirm Delete Submission #{del_id}", key=f"confirm_del_btn_{del_id}", type="primary"): 
             c.execute('DELETE FROM issues WHERE upload_id=?', (del_id,))
             c.execute('DELETE FROM uploads WHERE id=?', (del_id,))
             conn.commit()
@@ -283,10 +292,12 @@ params = []
 if sel_id:
     sql += ' WHERE i.upload_id = ?'
     params.append(sel_id)
-df = pd.read_sql(sql, conn, params=params, parse_dates=['date']) # 'date' in issues is the effective_report_date
+df = pd.read_sql(sql, conn, params=params, parse_dates=['date']) 
 
 if df.empty:
     st.warning("No data to display for the selected scope. Please upload data or broaden filters.")
+    if 'db_schema_updated_message_shown' in st.session_state: # Display schema update toast if it happened this session
+        st.toast("Database 'uploads' table schema updated successfully earlier this session.", icon="ℹ️")
     st.stop()
 
 # Filters
@@ -294,11 +305,10 @@ st.sidebar.subheader("Dashboard Filters")
 min_date_val = df['date'].min() 
 max_date_val = df['date'].max()
 
-# Ensure min_report_date and max_report_date are valid date objects
 min_report_date = min_date_val.date() if pd.notna(min_date_val) and hasattr(min_date_val, 'date') else date.today()
 max_report_date = max_date_val.date() if pd.notna(max_date_val) and hasattr(max_date_val, 'date') else date.today()
 
-if min_report_date > max_report_date: # handle case where min > max (e.g., only one date, or default today)
+if min_report_date > max_report_date: 
     max_report_date = min_report_date
 
 
@@ -312,7 +322,7 @@ date_range = st.sidebar.date_input(
     key="date_range_filter"
 )
 if not date_range or len(date_range) != 2: 
-    date_range = [min_report_date, max_report_date] # Fallback
+    date_range = [min_report_date, max_report_date]
 
 
 branch_opts = ['All'] + sorted(df['branch'].astype(str).unique().tolist()) 
@@ -330,7 +340,6 @@ df_f = df.copy()
 if date_range and len(date_range) == 2:
     start_date_filter = date_range[0]
     end_date_filter = date_range[1]
-    # Ensure df_f['date'] is datetime before trying .dt.date
     if pd.api.types.is_datetime64_any_dtype(df_f['date']):
         df_f = df_f[(df_f['date'].dt.date >= start_date_filter) & (df_f['date'].dt.date <= end_date_filter)]
     else:
@@ -350,37 +359,42 @@ st.write(f"Total issues found: {len(df_f)}")
 
 if df_f.empty:
     st.info("No data matches the current filter criteria.")
+    if 'db_schema_updated_message_shown' in st.session_state: # Display schema update toast if it happened this session
+        st.toast("Database 'uploads' table schema updated successfully earlier this session.", icon="ℹ️")
     st.stop()
 
 # Charts
 figs = {}
 if not df_f.empty:
     col1, col2 = st.columns(2)
+    # Chart generation logic (ensure robust against empty or all-NaN series)
+    def create_bar_chart(df_source, group_col, title):
+        if group_col in df_source.columns and not df_source[group_col].isnull().all():
+            data = df_source.astype({group_col: str}).groupby(group_col).size().reset_index(name='count').sort_values('count', ascending=False)
+            if not data.empty:
+                return px.bar(data, x=group_col, y='count', title=title, template="plotly_white")
+        return None
+
+    def create_pie_chart(df_source, group_col, title):
+        if group_col in df_source.columns and not df_source[group_col].isnull().all():
+            data = df_source.astype({group_col: str}).groupby(group_col).size().reset_index(name='count')
+            if not data.empty:
+                return px.pie(data, names=group_col, values='count', title=title, hole=0.3, template="plotly_white")
+        return None
+
     with col1:
-        if 'branch' in df_f.columns and not df_f['branch'].isnull().all():
-            branch_data = df_f.astype({'branch': str}).groupby('branch').size().reset_index(name='count').sort_values('count', ascending=False)
-            if not branch_data.empty:
-                figs['Branch'] = px.bar(branch_data, x='branch', y='count', title='Issues by Branch', template="plotly_white")
-                st.plotly_chart(figs['Branch'], use_container_width=True)
+        figs['Branch'] = create_bar_chart(df_f, 'branch', 'Issues by Branch')
+        if figs['Branch']: st.plotly_chart(figs['Branch'], use_container_width=True)
         
-        if 'report_type' in df_f.columns and not df_f['report_type'].isnull().all(): # This is the 'file_type_upload'
-            rt_data = df_f.astype({'report_type': str}).groupby('report_type').size().reset_index(name='count').sort_values('count', ascending=False)
-            if not rt_data.empty:
-                figs['Report Type'] = px.bar(rt_data, x='report_type', y='count', title='Issues by Report Type (Upload Setting)', template="plotly_white")
-                st.plotly_chart(figs['Report Type'], use_container_width=True)
+        figs['Report Type'] = create_bar_chart(df_f, 'report_type', 'Issues by Report Type (Upload Setting)')
+        if figs['Report Type']: st.plotly_chart(figs['Report Type'], use_container_width=True)
 
     with col2:
-        if 'area_manager' in df_f.columns and not df_f['area_manager'].isnull().all():
-            am_data = df_f.astype({'area_manager': str}).groupby('area_manager').size().reset_index(name='count')
-            if not am_data.empty:
-                figs['Area Manager'] = px.pie(am_data, names='area_manager', values='count', title='Issues by Area Manager', hole=0.3, template="plotly_white")
-                st.plotly_chart(figs['Area Manager'], use_container_width=True)
+        figs['Area Manager'] = create_pie_chart(df_f, 'area_manager', 'Issues by Area Manager')
+        if figs['Area Manager']: st.plotly_chart(figs['Area Manager'], use_container_width=True)
 
-        if 'upload_category' in df_f.columns and not df_f['upload_category'].isnull().all():
-            uc_data = df_f.astype({'upload_category': str}).groupby('upload_category').size().reset_index(name='count').sort_values('count', ascending=False)
-            if not uc_data.empty:
-                figs['Category'] = px.bar(uc_data, x='upload_category', y='count', title='Issues by Upload Category', template="plotly_white")
-                st.plotly_chart(figs['Category'], use_container_width=True)
+        figs['Category'] = create_bar_chart(df_f, 'upload_category', 'Issues by Upload Category')
+        if figs['Category']: st.plotly_chart(figs['Category'], use_container_width=True)
 
     if 'date' in df_f.columns and pd.api.types.is_datetime64_any_dtype(df_f['date']) and not df_f['date'].isnull().all(): 
         trend_data = df_f.groupby(df_f['date'].dt.date).size().reset_index(name='count')
@@ -394,7 +408,7 @@ if len(df_f) < 50 or (date_range and date_range[0] == date_range[1]):
     st.subheader("Detailed Records (Filtered)")
     df_display = df_f[['date', 'branch', 'report_type', 'upload_category', 'issues', 'area_manager', 'code']].copy()
     if pd.api.types.is_datetime64_any_dtype(df_display['date']):
-        df_display['date'] = df_display['date'].dt.strftime('%Y-%m-%d') # Format date for display
+        df_display['date'] = df_display['date'].dt.strftime('%Y-%m-%d') 
     st.dataframe(df_display)
 
 # Top issues
@@ -413,7 +427,7 @@ if not df_f.empty:
     if st.sidebar.button("Prepare Visuals PDF", key="prep_visuals_pdf"):
         if not wk_path or wk_path == "not found":
             st.sidebar.error("wkhtmltopdf path not set or invalid. Cannot generate PDF.")
-        elif not figs:
+        elif not any(figs.values()): # Check if any figure was actually generated
             st.sidebar.warning("No visuals to include in the PDF.")
         else:
             html_content = "<html><head><meta charset='utf-8'><title>Visuals Report</title>"
@@ -423,7 +437,7 @@ if not df_f.empty:
             chart_titles_in_order = ["Branch", "Area Manager", "Report Type", "Category", "Trend"]
             
             for title in chart_titles_in_order:
-                if title in figs:
+                if figs.get(title): # Use .get() for safer access
                     fig_obj = figs[title]
                     try:
                         img_bytes = fig_obj.to_image(format='png', engine='kaleido', scale=2)
@@ -475,3 +489,5 @@ else:
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Database: {DB_PATH}")
+if 'db_schema_updated_message_shown' in st.session_state: # Display schema update toast if it happened this session
+    st.toast("Reminder: Database 'uploads' table schema was updated earlier this session.", icon="ℹ️")
