@@ -396,9 +396,110 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
 
 # --- Downloads ---
 st.sidebar.subheader("Downloads")
-# (Download logic for primary period, can be expanded for comparison data)
+
+# Download for Primary Period Data
 if not df_primary_period.empty:
-    st.sidebar.download_button("CSV (Primary Period)", df_primary_period.to_csv(index=False).encode('utf-8'), "primary_period_issues.csv", "text/csv")
+    csv_data_primary = df_primary_period.to_csv(index=False).encode('utf-8')
+    st.sidebar.download_button(
+        "Download Primary Period Data as CSV",
+        csv_data_primary,
+        "primary_period_issues.csv",
+        "text/csv",
+        key="download_csv_primary"
+    )
+
+    # PDF for Primary Period Visuals
+    if st.sidebar.button("Prepare Visuals PDF (Primary Period)", key="prep_visuals_pdf_primary"):
+        if not wk_path or wk_path == "not found":
+            st.sidebar.error("wkhtmltopdf path not set or invalid. Cannot generate PDF.")
+        elif not any(figs_primary.values()): # Check if any figure was actually generated for primary
+            st.sidebar.warning("No visuals for primary period to include in the PDF.")
+        else:
+            html_content = "<html><head><meta charset='utf-8'><title>Visuals Report (Primary Period)</title>"
+            html_content += "<style>body{font-family:sans-serif;} h1,h2{text-align:center;} img{display:block;margin-left:auto;margin-right:auto;max-width:95%;height:auto;border:1px solid #ccc;padding:5px;margin-bottom:20px;} @media print {* {-webkit-print-color-adjust:exact !important; color-adjust:exact !important; print-color-adjust:exact !important;} body { background-color:white !important;}}</style>"
+            html_content += "</head><body>"
+            html_content += f"<h1>Visuals Report (Primary Period: {primary_date_range[0].strftime('%Y-%m-%d')} to {primary_date_range[1].strftime('%Y-%m-%d')})</h1>"
+            chart_titles_in_order = ["Branch", "Area Manager", "Report Type", "Category", "Trend"]
+            
+            for title in chart_titles_in_order:
+                if figs_primary.get(title): 
+                    fig_obj = figs_primary[title]
+                    try:
+                        img_bytes = fig_obj.to_image(format='png', engine='kaleido', scale=2)
+                        b64_img = base64.b64encode(img_bytes).decode()
+                        html_content += f"<h2>{title}</h2><img src='data:image/png;base64,{b64_img}' alt='{title}'/>"
+                    except Exception as e_fig:
+                        st.sidebar.warning(f"Could not convert figure '{title}' to image: {e_fig}. Ensure 'kaleido' is installed.")
+            html_content += "</body></html>"
+            
+            pdf_bytes = generate_pdf(html_content, fname='visuals_report_primary.pdf', wk_path=wk_path)
+            if pdf_bytes:
+                st.session_state.pdf_visuals_primary_data = pdf_bytes
+                st.sidebar.success("Visuals PDF for Primary Period is ready for download.")
+            else:
+                if 'pdf_visuals_primary_data' in st.session_state: del st.session_state.pdf_visuals_primary_data
+
+    if 'pdf_visuals_primary_data' in st.session_state and st.session_state.pdf_visuals_primary_data:
+        st.sidebar.download_button(
+            label="Download Visuals PDF (Primary Period) Now", 
+            data=st.session_state.pdf_visuals_primary_data,
+            file_name="visuals_report_primary.pdf", 
+            mime="application/pdf", 
+            key="action_download_visuals_pdf_primary"
+        )
+
+    # PDF for Primary Period Full Dashboard (Data Table)
+    if st.sidebar.button("Prepare Full Dashboard PDF (Primary Period)", key="prep_dashboard_pdf_primary"):
+        if not wk_path or wk_path == "not found":
+            st.sidebar.error("wkhtmltopdf path not set or invalid. Cannot generate PDF.")
+        else:
+            html_full = "<head><meta charset='utf-8'><style>body{font-family:sans-serif;} table{border-collapse:collapse;width:100%;} th,td{border:1px solid #ddd;padding:8px;text-align:left;} th{background-color:#f2f2f2;}</style></head>"
+            html_full += f"<h1>Dashboard Report (Primary Period: {primary_date_range[0].strftime('%Y-%m-%d')} to {primary_date_range[1].strftime('%Y-%m-%d')})</h1>"
+            df_pdf_view = df_primary_period[['date', 'branch', 'report_type', 'upload_category', 'issues', 'area_manager', 'code']].copy()
+            if pd.api.types.is_datetime64_any_dtype(df_pdf_view['date']):
+                df_pdf_view['date'] = df_pdf_view['date'].dt.strftime('%Y-%m-%d')
+            html_full += df_pdf_view.to_html(index=False, classes="dataframe", border=0)
+            
+            pdf_full_bytes = generate_pdf(html_full, fname='dashboard_report_primary.pdf', wk_path=wk_path)
+            if pdf_full_bytes:
+                st.session_state.pdf_dashboard_primary_data = pdf_full_bytes
+                st.sidebar.success("Dashboard PDF for Primary Period is ready for download.")
+            else:
+                if 'pdf_dashboard_primary_data' in st.session_state: del st.session_state.pdf_dashboard_primary_data
+
+    if 'pdf_dashboard_primary_data' in st.session_state and st.session_state.pdf_dashboard_primary_data:
+        st.sidebar.download_button(
+            label="Download Dashboard PDF (Primary Period) Now", 
+            data=st.session_state.pdf_dashboard_primary_data,
+            file_name="dashboard_report_primary.pdf", 
+            mime="application/pdf", 
+            key="action_download_dashboard_pdf_primary"
+        )
+else:
+    st.sidebar.info("No data in the primary period to download.")
+
+# Optional: Add downloads for comparison period data if comparison is enabled
+if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
+    if not df_comp1.empty: # Assuming df_comp1 is defined if comparison is enabled
+        csv_data_comp1 = df_comp1.to_csv(index=False).encode('utf-8')
+        st.sidebar.download_button(
+            "Download Comparison Period 1 Data as CSV",
+            csv_data_comp1,
+            f"comparison_period1_issues_{start_c1.strftime('%Y%m%d')}_{end_c1.strftime('%Y%m%d')}.csv", # Dynamic filename
+            "text/csv",
+            key="download_csv_comp1"
+        )
+    if not df_comp2.empty: # Assuming df_comp2 is defined
+        csv_data_comp2 = df_comp2.to_csv(index=False).encode('utf-8')
+        st.sidebar.download_button(
+            "Download Comparison Period 2 Data as CSV",
+            csv_data_comp2,
+            f"comparison_period2_issues_{start_c2.strftime('%Y%m%d')}_{end_c2.strftime('%Y%m%d')}.csv", # Dynamic filename
+            "text/csv",
+            key="download_csv_comp2"
+        )
+    # PDF downloads for comparison charts could be added here if needed,
+    # similar to how it's done for figs_primary, but using figures generated for comparison.
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Database: {DB_PATH}")
