@@ -1,33 +1,3 @@
-Okay, I've updated your Streamlit application code. Here's a summary of the key changes:
-
-Colored Visuals in PDF:
-
-The generate_pdf function's options for pdfkit have been updated to include 'no-grayscale': None, 'print-media-type': None, and 'background': None to strongly suggest color rendering.
-
-Added <meta charset="utf-8"> to the HTML generated for the PDF.
-
-Added style='max-width: 95%; height: auto; display: block; margin-left: auto; margin-right: auto;' to the <img> tags in the PDF for better image scaling and centering.
-
-Filter by File Type:
-
-A new multiselect filter for "File Type" has been added to the sidebar.
-
-The report_type column (which stores the file type like "opening", "closing", etc., from the upload process) is used for this filter.
-
-The main data filtering logic now incorporates the selected file types.
-
-Code Refinements:
-
-st.experimental_rerun() has been replaced with a more robust st.rerun() (with a fallback for very old versions, though st.rerun() is standard now).
-
-The SQL query for fetching data now explicitly uses i.upload_id for clarity when filtering by a specific upload.
-
-The labels for the download buttons that appear after PDF generation have been changed to be more descriptive (e.g., "Click here to download...") to reduce confusion. Unique keys have been added to these buttons.
-
-Ensured that file_type_opts for the new filter are sorted.
-
-Here's the modified code:
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
