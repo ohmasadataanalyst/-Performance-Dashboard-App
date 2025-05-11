@@ -66,8 +66,7 @@ if not st.session_state.authenticated:
             st.session_state.user_name = user_input
             st.rerun()
         elif user_input in view_only:
-            # Basic password check for view_only (replace with secure check if needed)
-            if pwd_input: # Example: any non-empty password
+            if pwd_input: 
                 st.session_state.authenticated = True
                 st.session_state.user_role = 'view_only'
                 st.session_state.user_name = user_input
@@ -98,20 +97,13 @@ def generate_pdf(html, fname='report.pdf', wk_path=None):
     try:
         import pdfkit
         config = pdfkit.configuration(wkhtmltopdf=wk_path)
-        
-        # --- SIMPLIFIED OPTIONS (Attempting to force color if wkhtmltopdf defaults to b/w) ---
         options = {
             'enable-local-file-access': None,
-            'images': None,                   # Ensure images are processed
+            'images': None,
             'encoding': "UTF-8",
-            # 'background': None,             # Add back if colors are still missing & it doesn't error
-            'load-error-handling': 'ignore', # Suppress errors from loading external resources if any
+            'load-error-handling': 'ignore',
             'load-media-error-handling': 'ignore',
-            # If the above doesn't work and your wkhtmltopdf doesn't have --no-grayscale,
-            # but DOES have --grayscale, it implies default is color.
-            # The CSS 'print-color-adjust' is the main hope for unpatched versions.
         }
-
         pdfkit.from_string(html, fname, configuration=config, options=options)
         with open(fname, 'rb') as f:
             return f.read()
@@ -119,7 +111,7 @@ def generate_pdf(html, fname='report.pdf', wk_path=None):
         st.error(f"wkhtmltopdf not found at the specified path: {wk_path}. Please ensure it's installed and the path is correct.")
         return None
     except Exception as e:
-        st.error(f"PDF generation error: {e}") # This will show the wkhtmltopdf error output
+        st.error(f"PDF generation error: {e}")
         return None
 
 # Sidebar: controls
@@ -146,7 +138,6 @@ if is_admin:
             try:
                 df_up = pd.read_excel(io.BytesIO(data))
                 df_up.columns = [col.strip().lower() for col in df_up.columns]
-                
                 required_cols = ['code', 'issues', 'branch', 'area manager', 'date']
                 missing_cols = [col for col in required_cols if col not in df_up.columns]
                 if missing_cols:
@@ -165,14 +156,13 @@ if is_admin:
                     st.sidebar.success(f"Uploaded {up.name} ({len(df_up)} records)")
             except Exception as e:
                 st.sidebar.error(f"Error processing Excel: {e}")
-                # Rollback upload if parsing failed after DB insert
                 c.execute('DELETE FROM uploads WHERE id=?', (uid,))
                 conn.commit()
         else:
             st.sidebar.warning("This file (based on name, uploader, type, category) has already been uploaded.")
 
 # wkhtmltopdf path
-default_wk = shutil.which('wkhtmltopdf') or 'not found' # Provide a default if not found
+default_wk = shutil.which('wkhtmltopdf') or 'not found'
 wk_path = st.sidebar.text_input("wkhtmltopdf path:", default_wk, help="Path to wkhtmltopdf executable.")
 
 # Load uploads for selection and deletion
@@ -204,7 +194,7 @@ if is_admin:
 sql = 'SELECT i.*, u.category as upload_category, u.file_type as master_file_type FROM issues i JOIN uploads u ON u.id = i.upload_id'
 params = []
 if sel_id:
-    sql += ' WHERE i.upload_id = ?' # Corrected to use i.upload_id
+    sql += ' WHERE i.upload_id = ?'
     params.append(sel_id)
 df = pd.read_sql(sql, conn, params=params, parse_dates=['date'])
 
@@ -219,7 +209,6 @@ max_date = df['date'].max().date() if not df.empty else datetime.today().date()
 
 date_range_val = [min_date, max_date]
 if 'date_range_filter' in st.session_state and len(st.session_state.date_range_filter) == 2:
-    # Persist date range if already set and valid, otherwise default
     if st.session_state.date_range_filter[0] >= min_date and st.session_state.date_range_filter[1] <= max_date:
         date_range_val = st.session_state.date_range_filter
 
@@ -264,33 +253,38 @@ if not df_f.empty:
         if 'branch' in df_f.columns and not df_f['branch'].empty:
             branch_data = df_f.groupby('branch').size().reset_index(name='count').sort_values('count', ascending=False)
             if not branch_data.empty:
-                figs['Branch'] = px.bar(branch_data, x='branch', y='count', title='Issues by Branch')
+                figs['Branch'] = px.bar(branch_data, x='branch', y='count', title='Issues by Branch',
+                                        template="plotly_white") # FORCE COLOR TEMPLATE
                 st.plotly_chart(figs['Branch'], use_container_width=True)
         
         if 'report_type' in df_f.columns and not df_f['report_type'].empty:
             rt_data = df_f.groupby('report_type').size().reset_index(name='count').sort_values('count', ascending=False)
             if not rt_data.empty:
-                figs['Report Type'] = px.bar(rt_data, x='report_type', y='count', title='Issues by Report Type')
+                figs['Report Type'] = px.bar(rt_data, x='report_type', y='count', title='Issues by Report Type',
+                                             template="plotly_white") # FORCE COLOR TEMPLATE
                 st.plotly_chart(figs['Report Type'], use_container_width=True)
 
     with col2:
         if 'area_manager' in df_f.columns and not df_f['area_manager'].empty:
             am_data = df_f.groupby('area_manager').size().reset_index(name='count')
             if not am_data.empty:
-                figs['Area Manager'] = px.pie(am_data, names='area_manager', values='count', title='Issues by Area Manager', hole=0.3)
+                figs['Area Manager'] = px.pie(am_data, names='area_manager', values='count', title='Issues by Area Manager', hole=0.3,
+                                              template="plotly_white") # FORCE COLOR TEMPLATE
                 st.plotly_chart(figs['Area Manager'], use_container_width=True)
 
         if 'upload_category' in df_f.columns and not df_f['upload_category'].empty:
             uc_data = df_f.groupby('upload_category').size().reset_index(name='count').sort_values('count', ascending=False)
             if not uc_data.empty:
-                figs['Category'] = px.bar(uc_data, x='upload_category', y='count', title='Issues by Upload Category')
+                figs['Category'] = px.bar(uc_data, x='upload_category', y='count', title='Issues by Upload Category',
+                                          template="plotly_white") # FORCE COLOR TEMPLATE
                 st.plotly_chart(figs['Category'], use_container_width=True)
 
     if 'date' in df_f.columns and not df_f['date'].empty:
         trend_data = df_f.groupby(df_f['date'].dt.date).size().reset_index(name='count')
-        trend_data = trend_data.sort_values('date') # Ensure dates are sorted for line chart
+        trend_data = trend_data.sort_values('date')
         if not trend_data.empty:
-            figs['Trend'] = px.line(trend_data, x='date', y='count', title='Issues Trend Over Time', markers=True)
+            figs['Trend'] = px.line(trend_data, x='date', y='count', title='Issues Trend Over Time', markers=True,
+                                    template="plotly_white") # FORCE COLOR TEMPLATE
             st.plotly_chart(figs['Trend'], use_container_width=True)
 
 # Detailed records
@@ -316,7 +310,6 @@ if st.sidebar.button("Prepare Visuals PDF", key="prep_visuals_pdf"):
     elif not figs:
         st.sidebar.warning("No visuals to include in the PDF.")
     else:
-        # --- HTML for Visuals PDF with CSS to force color printing ---
         html = """
         <html>
         <head>
@@ -329,7 +322,7 @@ if st.sidebar.button("Prepare Visuals PDF", key="prep_visuals_pdf"):
                         color-adjust: exact !important;
                         print-color-adjust: exact !important;
                     }
-                    body { background-color: white !important; } /* Ensure background isn't an issue */
+                    body { background-color: white !important; }
                 }
                 body { font-family: sans-serif; }
                 h1, h2 { text-align: center; }
@@ -337,11 +330,11 @@ if st.sidebar.button("Prepare Visuals PDF", key="prep_visuals_pdf"):
                     display: block;
                     margin-left: auto;
                     margin-right: auto;
-                    max-width: 95%; /* Ensure images fit well */
+                    max-width: 95%;
                     height: auto;
-                    border: 1px solid #ccc; /* Optional: add a border */
-                    padding: 5px; /* Optional: add some padding */
-                    margin-bottom: 20px; /* Space between images */
+                    border: 1px solid #ccc;
+                    padding: 5px;
+                    margin-bottom: 20px;
                 }
             </style>
         </head>
@@ -349,28 +342,32 @@ if st.sidebar.button("Prepare Visuals PDF", key="prep_visuals_pdf"):
         """
         html += f"<h1>Visuals Report ({date_range[0].strftime('%Y-%m-%d')} to {date_range[1].strftime('%Y-%m-%d')})</h1>"
         
-        chart_titles_in_order = ["Branch", "Area Manager", "Report Type", "Category", "Trend"] # Define desired order
+        chart_titles_in_order = ["Branch", "Area Manager", "Report Type", "Category", "Trend"]
         
         for title in chart_titles_in_order:
             if title in figs:
                 fig = figs[title]
                 try:
-                    # Using kaleido engine and increased scale for better quality
-                    img_bytes = fig.to_image(format='png', engine='kaleido', scale=2) 
+                    img_bytes = fig.to_image(format='png', engine='kaleido', scale=2)
                     
-                    # --- TEMPORARY: Save one image to disk for inspection ---
-                    # Remove this block after testing if the PNG itself is colored
-                    if title == "Branch" and 'saved_test_image' not in st.session_state: # Save only once per session run
-                        with open("test_chart_image_branch.png", "wb") as f_img:
-                            f_img.write(img_bytes)
-                        st.sidebar.info("Saved 'test_chart_image_branch.png' for inspection. Check this file for colors.")
-                        st.session_state.saved_test_image = True # Flag to prevent re-saving in same run
-                    # --- END TEMPORARY ---
+                    if title == "Branch": # Save only the first chart for testing
+                        if 'saved_test_image' not in st.session_state:
+                             with open("test_chart_image_branch.png", "wb") as f_img:
+                                f_img.write(img_bytes)
+                             st.sidebar.info("Saved 'test_chart_image_branch.png'. Check for colors.")
+                             st.session_state.saved_test_image = True
+                        elif st.session_state.get('saved_test_image_run_id', '') != st.runtime.scriptrunner.get_script_run_ctx().id:
+                            # If it's a new run, allow saving again (useful for iterative testing)
+                            with open("test_chart_image_branch.png", "wb") as f_img:
+                                f_img.write(img_bytes)
+                            st.sidebar.info("Re-saved 'test_chart_image_branch.png' on new run. Check for colors.")
+                            st.session_state.saved_test_image_run_id = st.runtime.scriptrunner.get_script_run_ctx().id
+
 
                     b64_img = base64.b64encode(img_bytes).decode()
-                    html += f"<h2>{title}</h2><img src='data:image/png;base64,{b64_img}' alt='{title}'/>" # Removed <br/> as margin-bottom added
+                    html += f"<h2>{title}</h2><img src='data:image/png;base64,{b64_img}' alt='{title}'/>"
                 except Exception as e:
-                    st.sidebar.warning(f"Could not convert figure '{title}' to image: {e}. Ensure 'kaleido' is installed (`pip install kaleido`).")
+                    st.sidebar.warning(f"Could not convert figure '{title}' to image: {e}. Ensure 'kaleido' is installed.")
         html += '</body></html>'
         
         pdf_content = generate_pdf(html, fname='visuals_report.pdf', wk_path=wk_path)
@@ -398,9 +395,8 @@ if st.sidebar.button("Prepare Full Dashboard PDF", key="prep_dashboard_pdf"):
     else:
         html_full = f"<head><meta charset='utf-8'><style>body {{font-family: sans-serif;}} table {{border-collapse: collapse; width: 100%;}} th, td {{border: 1px solid #ddd; padding: 8px; text-align: left;}} th {{background-color: #f2f2f2;}}</style></head>"
         html_full += f"<h1>Dashboard Report ({date_range[0].strftime('%Y-%m-%d')} to {date_range[1].strftime('%Y-%m-%d')})</h1>"
-        # Select and rename columns for better PDF output
         df_pdf_view = df_f[['date', 'branch', 'report_type', 'upload_category', 'issues', 'area_manager', 'code']].copy()
-        df_pdf_view['date'] = df_pdf_view['date'].dt.strftime('%Y-%m-%d') # Format date
+        df_pdf_view['date'] = df_pdf_view['date'].dt.strftime('%Y-%m-%d')
         html_full += df_pdf_view.to_html(index=False, classes="dataframe", border=0)
         
         pdf_full_content = generate_pdf(html_full, fname='dashboard_report.pdf', wk_path=wk_path)
@@ -422,3 +418,8 @@ if 'pdf_dashboard_data' in st.session_state and st.session_state.pdf_dashboard_d
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Database: {DB_PATH}")
+# For the temporary image saving logic:
+try:
+    import streamlit.runtime.scriptrunner # Try to import for newer Streamlit versions
+except ImportError:
+    pass # Older versions won't have this, the simple session_state flag will have to do
