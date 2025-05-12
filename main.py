@@ -1,4 +1,3 @@
-# --- START OF CODE PROVIDED BY USER (with necessary additions marked) ---
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -20,11 +19,14 @@ c = conn.cursor()
 
 c.execute('''CREATE TABLE IF NOT EXISTS uploads (
     id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, uploader TEXT, timestamp TEXT,
-    file_type TEXT, category TEXT, submission_date TEXT, file BLOB
+    file_type TEXT, category TEXT, 
+    submission_date TEXT, -- Stores the "Import From Date" selected during upload
+    file BLOB
 )''')
 c.execute('''CREATE TABLE IF NOT EXISTS issues (
     upload_id INTEGER, code TEXT, issues TEXT, branch TEXT, area_manager TEXT,
-    date TEXT, report_type TEXT, FOREIGN KEY(upload_id) REFERENCES uploads(id)
+    date TEXT, -- This date comes directly from the valid Excel rows
+    report_type TEXT, FOREIGN KEY(upload_id) REFERENCES uploads(id)
 )''')
 conn.commit()
 
@@ -48,20 +50,15 @@ db_admin = {
 }
 view_only = ["mohamed emad", "mohamed houider", "sujan podel", "ali ismail", "islam mostafa"]
 
-
-# --- NEW: Define Category-File Type Mapping ---
 category_file_types = {
     'operation-training': ['opening', 'closing', 'handover', 'store arranging', 'tempreature of heaters', 'defrost', 'clean AC'],
     'CCTV': ['issues', 'submission time'],
     'complaints': ['performance', 'اغلاق الشكاوي'], 
     'missing': ['performance'],
-    'visits': [], # No specific types for 'visits'
+    'visits': [], 
     'meal training': ['performance', 'missing types']
 }
-# List of all categories available for selection
 all_categories = list(category_file_types.keys())
-# --- END NEW ---
-
 
 if 'db_critical_error_msg' in st.session_state:
     st.error(f"DB Startup Error: {st.session_state.db_critical_error_msg}")
@@ -70,28 +67,19 @@ if 'db_schema_updated_flag' in st.session_state and st.session_state.db_schema_u
     st.toast("DB 'uploads' table schema updated.", icon="ℹ️")
     st.session_state.db_schema_updated_flag = False
 
+LOGO_PATH = "company_logo.png" 
+
 def check_login():
-    # --- Add logo to login page title ---
-    LOGO_PATH_LOGIN = "company_logo.png" # Define logo path here or globally
-    
     if 'authenticated' not in st.session_state:
         st.session_state.authenticated = False; st.session_state.user_name = None; st.session_state.user_role = None
     if not st.session_state.authenticated:
-        # --- Login Page Title with Logo ---
-        col1_login_title, col2_login_title = st.columns([1, 6]) # Adjust ratios if needed
+        col1_login_title, col2_login_title = st.columns([2, 6])
         with col1_login_title:
-            try:
-                st.image(LOGO_PATH_LOGIN, width=200) # Adjust width
-            except Exception: 
-                pass # Silently fail if logo can't be loaded here
-        
-        with col2_login_title:
-             st.title("📊 Login - Dashboard") # Title provided by user
-        # --- End of Login Page Title with Logo ---
-
+            try: st.image(LOGO_PATH, width=120) 
+            except Exception: pass 
+        with col2_login_title: st.title("📊 Login - Dashboard")
         st.subheader("Please log in to continue")
         with st.form("login_form"):
-            # Use unique keys for login form
             username = st.text_input("Full Name:", key="auth_username_login").strip().lower() 
             password = st.text_input("Password:", type="password", key="auth_password_login") 
             submitted = st.form_submit_button("Login")
@@ -107,23 +95,13 @@ def check_login():
     return True
 if not check_login(): st.stop()
 
-# --- Title with Logo ---
-logo_path = "company_logo.png"  # Or "assets/company_logo.png" if in a subdirectory
-
-col1_title, col2_title = st.columns([2, 6]) # Adjust column ratios as needed [logo_width, title_width]
-
+col1_title, col2_title = st.columns([2, 6])
 with col1_title:
-    try:
-        st.image(logo_path, width=120) # Adjust width as needed
-    except FileNotFoundError:
-        # Keep error message from user's code
-        st.error(f"Logo image not found at {logo_path}. Please check the path.") 
-    except Exception as e:
-        st.error(f"Error loading logo: {e}")
+    try: st.image(LOGO_PATH, width=120)
+    except FileNotFoundError: st.error(f"Logo image not found at {LOGO_PATH}. Please check the path.") 
+    except Exception as e: st.error(f"Error loading logo: {e}")
+with col2_title: st.title("📊 Classic Dashboard for Performance")
 
-
-with col2_title:
-    st.title("📊 Classic Dashboard for Performance")
 user_name_display = st.session_state.get('user_name', "N/A").title()
 user_role_display = st.session_state.get('user_role', "N/A")
 st.sidebar.success(f"Logged in as: {user_name_display} ({user_role_display})")
@@ -143,98 +121,120 @@ def generate_pdf(html, fname='report.pdf', wk_path=None):
 
 st.sidebar.header("🔍 Filters & Options")
 
-
-# ==============================================================
-# --- START: MODIFIED Admin Controls SECTION ---
-# ==============================================================
 if is_admin:
     st.sidebar.subheader("Admin Controls")
-    st.sidebar.markdown("Set parameters below, choose Excel file, then click 'Upload Data'.")
+    st.sidebar.markdown("Set parameters, select Excel, specify import date range, then upload.")
     
-    # 1. Category Selection (Use the defined list and a key)
     selected_category = st.sidebar.selectbox(
-        "Category for upload",
-        options=all_categories, # Use the defined list from mapping
-        key="admin_category_select" # Use a key
+        "Category for upload", options=all_categories, key="admin_category_select"
     )
-    
-    # 2. Get Valid File Types based on Currently Selected Category
-    # Access the selected category value using its key from session state
-    # Provide a default (e.g., first category) if state is not set yet (initial run)
     current_category_state = st.session_state.get("admin_category_select", all_categories[0]) 
-    valid_file_types = category_file_types.get(current_category_state, []) # Get list, default to empty list
-
-    # 3. File Type Selection (Dynamic Options)
+    valid_file_types = category_file_types.get(current_category_state, [])
     selected_file_type = st.sidebar.selectbox(
-        "File type for upload",
-        options=valid_file_types, # Use the dynamic list
-        key="admin_file_type_select", # Use a key
-        disabled=(not valid_file_types), # Disable if no valid types
-        help="Options change based on the selected category." 
+        "File type for upload", options=valid_file_types, key="admin_file_type_select",
+        disabled=(not valid_file_types), help="Options change based on category." 
     )
     
-    # 4. Rest of the upload controls (Effective Date, File Uploader)
-    effective_report_date = st.sidebar.date_input(
-        "**Effective Date of Report:**", value=date.today(), key="effective_report_date_upload",
-        help="Select the date this report should be attributed to. All issues from the uploaded file will use this date."
+    st.sidebar.markdown("**Filter Excel Data by Date Range for this Import:**")
+    import_from_date = st.sidebar.date_input(
+        "Import Data From Date:", 
+        value=date.today() - timedelta(days=7), # Default to a week ago
+        key="import_from_date_upload"
     )
+    import_to_date = st.sidebar.date_input(
+        "Import Data To Date:", 
+        value=date.today(), 
+        key="import_to_date_upload"
+    )
+
     up = st.sidebar.file_uploader("Upload Excel File (.xlsx)", type=["xlsx"], key="excel_uploader")
     upload_btn = st.sidebar.button("Upload Data", key="upload_data_button")
 
-    # 5. Upload Processing Logic (Use values from session state)
     if upload_btn: 
-        # Get the definitive values from session state right before processing
         final_category = st.session_state.admin_category_select
         final_file_type = st.session_state.admin_file_type_select
-        
-        # Check if file type is required but not selected
-        requires_file_type = bool(category_file_types.get(final_category, [])) # Check if the list of types is non-empty
+        # Get import dates from session state
+        imp_from_dt = st.session_state.import_from_date_upload
+        imp_to_dt = st.session_state.import_to_date_upload    
+
+        requires_file_type = bool(category_file_types.get(final_category, []))
         
         if requires_file_type and not final_file_type:
-             st.sidebar.warning(f"Please select a file type for the '{final_category}' category.")
+             st.sidebar.warning(f"Please select a file type for '{final_category}'.")
         elif not up:
-             st.sidebar.error("Please select an Excel file to upload.")
-        elif not effective_report_date:
-             st.sidebar.error("Please select an Effective Date.") # Should not happen with date_input
-        else: # Proceed with upload
-            # Handle categories with no required file type (like 'visits')
+             st.sidebar.error("Please select an Excel file.")
+        elif not imp_from_dt or not imp_to_dt:
+             st.sidebar.error("Please select both Import From and To Dates.")
+        elif imp_from_dt > imp_to_dt:
+             st.sidebar.error("Import From Date cannot be after Import To Date.")
+        else: 
             if not requires_file_type:
-                final_file_type = None # Store None or "" if no type needed
+                final_file_type = None 
 
-            data = up.getvalue(); ts = datetime.now().isoformat(); effective_date_str = effective_report_date.isoformat() 
-            
-            # Use final_category and final_file_type in DB check and inserts
+            data = up.getvalue(); ts = datetime.now().isoformat()
+            import_from_date_str = imp_from_dt.isoformat()
+
+            # Uniqueness check for the upload batch record
             c.execute('SELECT COUNT(*) FROM uploads WHERE filename=? AND uploader=? AND file_type IS ? AND category=? AND submission_date=?',
-                      (up.name, current_user, final_file_type, final_category, effective_date_str)) # Use IS for potential None comparison
+                      (up.name, current_user, final_file_type, final_category, import_from_date_str))
             
-            if c.fetchone()[0] == 0:
-                c.execute('INSERT INTO uploads (filename, uploader, timestamp, file_type, category, submission_date, file) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                          (up.name, current_user, ts, final_file_type, final_category, effective_date_str, sqlite3.Binary(data)))
-                uid = c.lastrowid
+            uid_for_rollback = None 
+            if c.fetchone()[0] == 0: 
                 try:
-                    df_up = pd.read_excel(io.BytesIO(data)); df_up.columns = [col.strip().lower() for col in df_up.columns]
+                    c.execute('INSERT INTO uploads (filename, uploader, timestamp, file_type, category, submission_date, file) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                              (up.name, current_user, ts, final_file_type, final_category, 
+                               import_from_date_str, sqlite3.Binary(data)))
+                    uid_for_rollback = c.lastrowid
+
+                    df_excel_full = pd.read_excel(io.BytesIO(data))
+                    df_excel_full.columns = [col.strip().lower() for col in df_excel_full.columns]
                     required_cols = ['code', 'issues', 'branch', 'area manager', 'date'] 
-                    missing_cols = [col for col in required_cols if col not in df_up.columns]
+                    missing_cols = [col for col in required_cols if col not in df_excel_full.columns]
+                    
                     if missing_cols:
-                        st.sidebar.error(f"Excel missing: {', '.join(missing_cols)}. Aborted."); c.execute('DELETE FROM uploads WHERE id=?', (uid,)); conn.commit()
+                        st.sidebar.error(f"Excel missing: {', '.join(missing_cols)}. Aborted.")
+                        if uid_for_rollback: c.execute('DELETE FROM uploads WHERE id=?', (uid_for_rollback,)); conn.commit()
                     else:
-                        df_up['excel_date_validated'] = pd.to_datetime(df_up['date'], dayfirst=True, errors='coerce')
-                        original_len = len(df_up); df_up.dropna(subset=['excel_date_validated'], inplace=True)
-                        if len(df_up) < original_len: st.sidebar.warning(f"{original_len - len(df_up)} rows dropped (invalid date).")
-                        if df_up.empty:
-                            st.sidebar.error("No valid data in Excel. Aborted."); c.execute('DELETE FROM uploads WHERE id=?', (uid,)); conn.commit()
+                        df_excel_full['parsed_date'] = pd.to_datetime(df_excel_full['date'], dayfirst=True, errors='coerce')
+                        original_excel_rows = len(df_excel_full)
+                        df_excel_full.dropna(subset=['parsed_date'], inplace=True) 
+                        
+                        if len(df_excel_full) < original_excel_rows:
+                            st.sidebar.warning(f"{original_excel_rows - len(df_excel_full)} rows dropped from Excel (invalid date format).")
+                        
+                        if df_excel_full.empty:
+                            st.sidebar.error("No valid data rows with parsable dates in Excel. Aborted.")
+                            if uid_for_rollback: c.execute('DELETE FROM uploads WHERE id=?', (uid_for_rollback,)); conn.commit()
                         else:
-                            for _, row in df_up.iterrows():
-                                # Store the selected file type in the issues table
-                                c.execute('INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                                          (uid, row['code'], row['issues'], row['branch'], row['area manager'], effective_date_str, final_file_type)) 
-                            conn.commit(); st.sidebar.success(f"Uploaded '{up.name}' ({len(df_up)} recs) Eff.Date: {effective_date_str}"); st.rerun() 
+                            # --- FILTER EXCEL DATA BY SELECTED IMPORT RANGE ---
+                            df_to_import = df_excel_full[
+                                (df_excel_full['parsed_date'].dt.date >= imp_from_dt) &
+                                (df_excel_full['parsed_date'].dt.date <= imp_to_dt)
+                            ].copy() # Use .copy() to avoid SettingWithCopyWarning
+
+                            if df_to_import.empty:
+                                st.sidebar.info(f"No rows found in '{up.name}' within the selected import date range: "
+                                                f"{imp_from_dt.strftime('%Y-%m-%d')} to {imp_to_dt.strftime('%Y-%m-%d')}.")
+                                # Keep the upload record as it's a valid file, just no data in range for this import
+                            else:
+                                for _, row in df_to_import.iterrows():
+                                    issue_date_str = row['parsed_date'].strftime('%Y-%m-%d')
+                                    c.execute('INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                                              (uid_for_rollback, row['code'], row['issues'], row['branch'], row['area manager'], 
+                                               issue_date_str, final_file_type)) 
+                                conn.commit()
+                                st.sidebar.success(f"Successfully imported {len(df_to_import)} issues from '{up.name}' for the date range "
+                                                   f"{imp_from_dt.strftime('%Y-%m-%d')} to {imp_to_dt.strftime('%Y-%m-%d')}.")
+                            st.rerun() 
                 except Exception as e:
-                    st.sidebar.error(f"Excel error '{up.name}': {e}. Rolled back."); c.execute('DELETE FROM uploads WHERE id=?', (uid,)); conn.commit()
-            else: st.sidebar.warning(f"Duplicate file for date '{effective_date_str}' exists.")
-# ==============================================================
-# --- END: MODIFIED Admin Controls SECTION ---
-# ==============================================================
+                    st.sidebar.error(f"Error during processing of '{up.name}': {e}.")
+                    if uid_for_rollback: 
+                        c.execute('DELETE FROM issues WHERE upload_id=?', (uid_for_rollback,)) 
+                        c.execute('DELETE FROM uploads WHERE id=?', (uid_for_rollback,))
+                        conn.commit()
+            else: 
+                st.sidebar.warning(f"Upload batch for '{up.name}' by '{current_user}' (type: '{final_file_type}', cat: '{final_category}') "
+                                   f"with import start date '{import_from_date_str}' seems to be a duplicate.")
 
 
 default_wk = shutil.which('wkhtmltopdf') or 'not found'
@@ -245,15 +245,21 @@ def format_display_date(d): return datetime.strptime(str(d),'%Y-%m-%d').strftime
 df_uploads_raw['display_submission_date'] = df_uploads_raw['submission_date'].apply(format_display_date)
 
 st.sidebar.subheader("Data Scope")
-# Display Category and File Type in the dropdown
-scope_opts = ['All uploads'] + [f"{r['id']} - {r['filename']} ({r['category']}/{r['file_type'] or 'N/A'}) Eff.Date: {r['display_submission_date']}" for i,r in df_uploads_raw.iterrows()]
+scope_opts = ['All uploads'] + [
+    (f"{r['id']} - {r['filename']} ({r['category']}/{r['file_type'] or 'N/A'}) "
+     f"Imported From: {r['display_submission_date']}") # Changed label
+    for i,r in df_uploads_raw.iterrows()
+]
 sel_display = st.sidebar.selectbox("Select upload to analyze:", scope_opts, key="select_upload_scope")
 sel_id = int(sel_display.split(' - ')[0]) if sel_display != 'All uploads' else None
 
 if is_admin:
     st.sidebar.subheader("Manage Submissions")
-    # Display Category and File Type in the delete dropdown too
-    delete_opts_list = [f"{row['id']} - {row['filename']} ({row['category']}/{row['file_type'] or 'N/A'}) Eff.Date: {row['display_submission_date']}" for index, row in df_uploads_raw.iterrows()]
+    delete_opts_list = [
+        (f"{row['id']} - {row['filename']} ({row['category']}/{row['file_type'] or 'N/A'}) "
+         f"Imported From: {row['display_submission_date']}")
+        for index, row in df_uploads_raw.iterrows()
+    ]
     delete_opts = ['Select ID to Delete'] + delete_opts_list
     del_choice_display = st.sidebar.selectbox("🗑️ Delete Submission:", delete_opts, key="delete_submission_id")
     if del_choice_display != 'Select ID to Delete':
@@ -262,12 +268,10 @@ if is_admin:
             c.execute('DELETE FROM issues WHERE upload_id=?', (del_id_val,)); c.execute('DELETE FROM uploads WHERE id=?', (del_id_val,)); conn.commit()
             st.sidebar.success(f"Deleted submission {del_id_val}."); st.rerun()
 
-# Fetch data using JOIN to get category from uploads table
 df_all_issues = pd.read_sql(
     'SELECT i.*, u.category as upload_category, u.id as upload_id_col FROM issues i JOIN uploads u ON u.id = i.upload_id',
     conn, parse_dates=['date']
 )
-
 
 if df_all_issues.empty:
     st.warning("No data in database. Please upload data."); st.stop()
@@ -277,21 +281,18 @@ min_overall_date = df_all_issues['date'].min().date() if pd.notna(df_all_issues[
 max_overall_date = df_all_issues['date'].max().date() if pd.notna(df_all_issues['date'].max()) else date.today()
 
 primary_date_range = st.sidebar.date_input(
-    "Primary Date Range (Effective Report Date):",
+    "Primary Date Range (Issue Dates):",
     value=[min_overall_date, max_overall_date] if min_overall_date <= max_overall_date else [max_overall_date, min_overall_date],
     min_value=min_overall_date, max_value=max_overall_date, key="primary_date_range_filter"
 )
 if not primary_date_range or len(primary_date_range) != 2: primary_date_range = [min_overall_date, max_overall_date]
 
-# General Filters
 branch_opts = ['All'] + sorted(df_all_issues['branch'].astype(str).unique().tolist())
 sel_branch = st.sidebar.multiselect("Branch:", branch_opts, default=['All'], key="branch_filter")
-# Use 'upload_category' from the JOIN for filtering categories
 cat_opts = ['All'] + sorted(df_all_issues['upload_category'].astype(str).unique().tolist()) 
 sel_cat = st.sidebar.multiselect("Category:", cat_opts, default=['All'], key="category_filter")
 am_opts = ['All'] + sorted(df_all_issues['area_manager'].astype(str).unique().tolist())
 sel_am = st.sidebar.multiselect("Area Manager:", am_opts, default=['All'], key="area_manager_filter")
-# Use 'report_type' from the 'issues' table for filtering file types
 file_type_filter_opts = ['All'] + sorted(df_all_issues['report_type'].astype(str).unique().tolist()) 
 sel_ft = st.sidebar.multiselect("File Type (Report Type):", file_type_filter_opts, default=['All'], key="file_type_filter")
 
@@ -312,22 +313,17 @@ if enable_comparison:
     if not comparison_date_range_1 or len(comparison_date_range_1) != 2: comparison_date_range_1 = None
     if not comparison_date_range_2 or len(comparison_date_range_2) != 2: comparison_date_range_2 = None
 
-# Apply Filters Function (Updated to reflect data structure)
 def apply_general_filters(df_input, sel_upload_id_val, selected_branches, selected_categories, selected_managers, selected_file_types):
     df_filtered = df_input.copy()
-    if sel_upload_id_val: df_filtered = df_filtered[df_filtered['upload_id_col'] == sel_upload_id_val] # Use alias from JOIN
+    if sel_upload_id_val: df_filtered = df_filtered[df_filtered['upload_id_col'] == sel_upload_id_val]
     if 'All' not in selected_branches: df_filtered = df_filtered[df_filtered['branch'].isin(selected_branches)]
-    # Filter using 'upload_category' which comes from the 'uploads' table via JOIN
     if 'All' not in selected_categories: df_filtered = df_filtered[df_filtered['upload_category'].isin(selected_categories)] 
     if 'All' not in selected_managers: df_filtered = df_filtered[df_filtered['area_manager'].isin(selected_managers)]
-    # Filter using 'report_type' which comes from the 'issues' table 
     if 'All' not in selected_file_types: df_filtered = df_filtered[df_filtered['report_type'].isin(selected_file_types)]
     return df_filtered
 
-# Apply filters
 df_temp_filtered = apply_general_filters(df_all_issues, sel_id, sel_branch, sel_cat, sel_am, sel_ft)
 
-# Filter for Primary Period
 df_primary_period = df_temp_filtered.copy()
 if primary_date_range and len(primary_date_range) == 2:
     start_date, end_date = primary_date_range[0], primary_date_range[1]
@@ -337,7 +333,6 @@ else: df_primary_period = pd.DataFrame(columns=df_temp_filtered.columns)
 st.subheader(f"Filtered Issues for Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}")
 st.write(f"Total issues found in primary period: {len(df_primary_period)}")
 
-# Charting Functions (from user's code)
 def create_bar_chart(df_source, group_col, title_suffix=""):
     title = f"Issues by {group_col.replace('_',' ').title()} {title_suffix}"
     if group_col in df_source.columns and not df_source[group_col].isnull().all():
@@ -351,7 +346,6 @@ def create_pie_chart(df_source, group_col, title_suffix=""):
         if not data.empty: return px.pie(data, names=group_col, values='count', title=title, hole=0.3, template="plotly_white")
     return None
 
-# Primary Dashboard Display
 if df_primary_period.empty:
     st.info("No data matches the current filter criteria for the primary period.")
 else:
@@ -365,11 +359,9 @@ else:
     with col2:
         figs_primary['Area Manager'] = create_pie_chart(df_primary_period, 'area_manager', '(Primary)')
         if figs_primary['Area Manager']: st.plotly_chart(figs_primary['Area Manager'], use_container_width=True)
-        # Use 'upload_category' for the category chart
         figs_primary['Category'] = create_bar_chart(df_primary_period, 'upload_category', '(Primary)') 
         if figs_primary['Category']: st.plotly_chart(figs_primary['Category'], use_container_width=True)
     
-    # Enhanced Trend Chart
     if 'date' in df_primary_period.columns and pd.api.types.is_datetime64_any_dtype(df_primary_period['date']) and not df_primary_period['date'].isnull().all():
         trend_data_primary = df_primary_period.groupby(df_primary_period['date'].dt.date).size().reset_index(name='daily_issues')
         trend_data_primary['date'] = pd.to_datetime(trend_data_primary['date']) 
@@ -384,7 +376,6 @@ else:
             figs_primary['Trend'] = fig_trend 
             st.plotly_chart(figs_primary['Trend'], use_container_width=True)
 
-    # Detailed Records
     if len(df_primary_period) < 50 or (primary_date_range and primary_date_range[0] == primary_date_range[1]):
         st.subheader("Detailed Records (Primary Period - Filtered)")
         df_display_primary = df_primary_period[['date', 'branch', 'report_type', 'upload_category', 'issues', 'area_manager', 'code']].copy()
@@ -392,13 +383,11 @@ else:
             df_display_primary['date'] = df_display_primary['date'].dt.strftime('%Y-%m-%d') 
         st.dataframe(df_display_primary, use_container_width=True)
 
-    # Top Issues
     st.subheader("Top Issues (Primary Period - Filtered)")
     if 'issues' in df_primary_period.columns and not df_primary_period['issues'].isnull().all():
         top_issues_primary = df_primary_period['issues'].astype(str).value_counts().head(20).rename_axis('Issue Description').reset_index(name='Frequency')
         if not top_issues_primary.empty: st.dataframe(top_issues_primary, use_container_width=True)
 
-# Period Comparison Display
 if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
     st.markdown("---"); st.header("📊 Period Comparison Results")
     df_comp1 = df_temp_filtered.copy(); start_c1, end_c1 = comparison_date_range_1[0], comparison_date_range_1[1]
@@ -422,7 +411,7 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
             if not df_comp2.empty: st.dataframe(df_comp2['issues'].value_counts().nlargest(5).reset_index().rename(columns={'index':'Issue', 'issues':'Count'}), height=220, use_container_width=True)
         
         if not df_comp1.empty or not df_comp2.empty:
-            df_comp1_labeled = df_comp1.copy(); df_comp2_labeled = df_comp2.copy() # Use copies
+            df_comp1_labeled = df_comp1.copy(); df_comp2_labeled = df_comp2.copy()
             df_comp1_labeled['period_label'] = f"P1: {start_c1:%d%b}-{end_c1:%d%b}"
             df_comp2_labeled['period_label'] = f"P2: {start_c2:%d%b}-{end_c2:%d%b}"
             df_combined_branch = pd.concat([df_comp1_labeled, df_comp2_labeled])
@@ -432,7 +421,6 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                     fig_branch_comp = px.bar(branch_comp_data, x='branch', y='count', color='period_label', barmode='group', title='Issues by Branch (Comparison)')
                     st.plotly_chart(fig_branch_comp, use_container_width=True)
             
-            # Period-Level Trend Chart
             st.markdown("#### Period-Level Trend (Average Daily Issues)")
             period_summary_data = []
             if not df_comp1.empty:
@@ -452,17 +440,14 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                     fig_period_level_trend.update_traces(texttemplate='%{text:.2f}', textposition='top center')
                 fig_period_level_trend.update_layout(xaxis_title="Comparison Period", yaxis_title="Avg. Daily Issues", template="plotly_white")
                 st.plotly_chart(fig_period_level_trend, use_container_width=True)
-            else:
-                st.info("Not enough data for period-level trend.")
+            else: st.info("Not enough data for period-level trend.")
 
-# Downloads Section (from user's code, confirmed to have PDF logic)
 st.sidebar.subheader("Downloads")
 if not df_primary_period.empty:
     csv_data_primary = df_primary_period.to_csv(index=False).encode('utf-8')
     st.sidebar.download_button("Download Primary Period Data as CSV", csv_data_primary, "primary_period_issues.csv", "text/csv", key="download_csv_primary")
     if st.sidebar.button("Prepare Visuals PDF (Primary Period)", key="prep_visuals_pdf_primary"):
         if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set.")
-        # Check if figs_primary exists and has items
         elif 'figs_primary' not in locals() or not figs_primary or not any(figs_primary.values()): 
              st.sidebar.warning("No visuals generated for primary period.")
         else:
@@ -514,4 +499,3 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Database: {DB_PATH}")
-# --- END OF CODE ---
