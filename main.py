@@ -138,7 +138,7 @@ if is_admin:
     st.sidebar.markdown("**Filter Excel Data by Date Range for this Import:**")
     import_from_date = st.sidebar.date_input(
         "Import Data From Date:", 
-        value=date.today() - timedelta(days=7), # Default to a week ago
+        value=date.today() - timedelta(days=7), 
         key="import_from_date_upload"
     )
     import_to_date = st.sidebar.date_input(
@@ -153,89 +153,55 @@ if is_admin:
     if upload_btn: 
         final_category = st.session_state.admin_category_select
         final_file_type = st.session_state.admin_file_type_select
-        # Get import dates from session state
         imp_from_dt = st.session_state.import_from_date_upload
         imp_to_dt = st.session_state.import_to_date_upload    
-
         requires_file_type = bool(category_file_types.get(final_category, []))
         
         if requires_file_type and not final_file_type:
              st.sidebar.warning(f"Please select a file type for '{final_category}'.")
-        elif not up:
-             st.sidebar.error("Please select an Excel file.")
-        elif not imp_from_dt or not imp_to_dt:
-             st.sidebar.error("Please select both Import From and To Dates.")
-        elif imp_from_dt > imp_to_dt:
-             st.sidebar.error("Import From Date cannot be after Import To Date.")
+        elif not up: st.sidebar.error("Please select an Excel file.")
+        elif not imp_from_dt or not imp_to_dt: st.sidebar.error("Please select both Import From and To Dates.")
+        elif imp_from_dt > imp_to_dt: st.sidebar.error("Import From Date cannot be after Import To Date.")
         else: 
-            if not requires_file_type:
-                final_file_type = None 
-
-            data = up.getvalue(); ts = datetime.now().isoformat()
-            import_from_date_str = imp_from_dt.isoformat()
-
-            # Uniqueness check for the upload batch record
+            if not requires_file_type: final_file_type = None 
+            data = up.getvalue(); ts = datetime.now().isoformat(); import_from_date_str = imp_from_dt.isoformat()
             c.execute('SELECT COUNT(*) FROM uploads WHERE filename=? AND uploader=? AND file_type IS ? AND category=? AND submission_date=?',
                       (up.name, current_user, final_file_type, final_category, import_from_date_str))
-            
             uid_for_rollback = None 
             if c.fetchone()[0] == 0: 
                 try:
                     c.execute('INSERT INTO uploads (filename, uploader, timestamp, file_type, category, submission_date, file) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                              (up.name, current_user, ts, final_file_type, final_category, 
-                               import_from_date_str, sqlite3.Binary(data)))
+                              (up.name, current_user, ts, final_file_type, final_category, import_from_date_str, sqlite3.Binary(data)))
                     uid_for_rollback = c.lastrowid
-
-                    df_excel_full = pd.read_excel(io.BytesIO(data))
-                    df_excel_full.columns = [col.strip().lower() for col in df_excel_full.columns]
+                    df_excel_full = pd.read_excel(io.BytesIO(data)); df_excel_full.columns = [col.strip().lower() for col in df_excel_full.columns]
                     required_cols = ['code', 'issues', 'branch', 'area manager', 'date'] 
                     missing_cols = [col for col in required_cols if col not in df_excel_full.columns]
-                    
                     if missing_cols:
                         st.sidebar.error(f"Excel missing: {', '.join(missing_cols)}. Aborted.")
                         if uid_for_rollback: c.execute('DELETE FROM uploads WHERE id=?', (uid_for_rollback,)); conn.commit()
                     else:
                         df_excel_full['parsed_date'] = pd.to_datetime(df_excel_full['date'], dayfirst=True, errors='coerce')
-                        original_excel_rows = len(df_excel_full)
-                        df_excel_full.dropna(subset=['parsed_date'], inplace=True) 
-                        
-                        if len(df_excel_full) < original_excel_rows:
-                            st.sidebar.warning(f"{original_excel_rows - len(df_excel_full)} rows dropped from Excel (invalid date format).")
-                        
+                        original_excel_rows = len(df_excel_full); df_excel_full.dropna(subset=['parsed_date'], inplace=True) 
+                        if len(df_excel_full) < original_excel_rows: st.sidebar.warning(f"{original_excel_rows - len(df_excel_full)} rows dropped (invalid date format).")
                         if df_excel_full.empty:
                             st.sidebar.error("No valid data rows with parsable dates in Excel. Aborted.")
                             if uid_for_rollback: c.execute('DELETE FROM uploads WHERE id=?', (uid_for_rollback,)); conn.commit()
                         else:
-                            # --- FILTER EXCEL DATA BY SELECTED IMPORT RANGE ---
-                            df_to_import = df_excel_full[
-                                (df_excel_full['parsed_date'].dt.date >= imp_from_dt) &
-                                (df_excel_full['parsed_date'].dt.date <= imp_to_dt)
-                            ].copy() # Use .copy() to avoid SettingWithCopyWarning
-
+                            df_to_import = df_excel_full[(df_excel_full['parsed_date'].dt.date >= imp_from_dt) & (df_excel_full['parsed_date'].dt.date <= imp_to_dt)].copy()
                             if df_to_import.empty:
-                                st.sidebar.info(f"No rows found in '{up.name}' within the selected import date range: "
-                                                f"{imp_from_dt.strftime('%Y-%m-%d')} to {imp_to_dt.strftime('%Y-%m-%d')}.")
-                                # Keep the upload record as it's a valid file, just no data in range for this import
+                                st.sidebar.info(f"No rows in '{up.name}' within import range: {imp_from_dt:%Y-%m-%d} to {imp_to_dt:%Y-%m-%d}.")
                             else:
                                 for _, row in df_to_import.iterrows():
                                     issue_date_str = row['parsed_date'].strftime('%Y-%m-%d')
                                     c.execute('INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                                              (uid_for_rollback, row['code'], row['issues'], row['branch'], row['area manager'], 
-                                               issue_date_str, final_file_type)) 
+                                              (uid_for_rollback, row['code'], row['issues'], row['branch'], row['area manager'], issue_date_str, final_file_type)) 
                                 conn.commit()
-                                st.sidebar.success(f"Successfully imported {len(df_to_import)} issues from '{up.name}' for the date range "
-                                                   f"{imp_from_dt.strftime('%Y-%m-%d')} to {imp_to_dt.strftime('%Y-%m-%d')}.")
+                                st.sidebar.success(f"Imported {len(df_to_import)} issues from '{up.name}' for range {imp_from_dt:%Y-%m-%d} to {imp_to_dt:%Y-%m-%d}.")
                             st.rerun() 
                 except Exception as e:
-                    st.sidebar.error(f"Error during processing of '{up.name}': {e}.")
-                    if uid_for_rollback: 
-                        c.execute('DELETE FROM issues WHERE upload_id=?', (uid_for_rollback,)) 
-                        c.execute('DELETE FROM uploads WHERE id=?', (uid_for_rollback,))
-                        conn.commit()
-            else: 
-                st.sidebar.warning(f"Upload batch for '{up.name}' by '{current_user}' (type: '{final_file_type}', cat: '{final_category}') "
-                                   f"with import start date '{import_from_date_str}' seems to be a duplicate.")
-
+                    st.sidebar.error(f"Error processing '{up.name}': {e}.")
+                    if uid_for_rollback: c.execute('DELETE FROM issues WHERE upload_id=?', (uid_for_rollback,)); c.execute('DELETE FROM uploads WHERE id=?', (uid_for_rollback,)); conn.commit()
+            else: st.sidebar.warning(f"Upload batch for '{up.name}' by '{current_user}' (type: '{final_file_type}', cat: '{final_category}') with import start date '{import_from_date_str}' seems duplicate.")
 
 default_wk = shutil.which('wkhtmltopdf') or 'not found'
 wk_path = st.sidebar.text_input("wkhtmltopdf path:", default_wk)
@@ -245,21 +211,13 @@ def format_display_date(d): return datetime.strptime(str(d),'%Y-%m-%d').strftime
 df_uploads_raw['display_submission_date'] = df_uploads_raw['submission_date'].apply(format_display_date)
 
 st.sidebar.subheader("Data Scope")
-scope_opts = ['All uploads'] + [
-    (f"{r['id']} - {r['filename']} ({r['category']}/{r['file_type'] or 'N/A'}) "
-     f"Imported From: {r['display_submission_date']}") # Changed label
-    for i,r in df_uploads_raw.iterrows()
-]
+scope_opts = ['All uploads'] + [(f"{r['id']} - {r['filename']} ({r['category']}/{r['file_type'] or 'N/A'}) Imported From: {r['display_submission_date']}") for i,r in df_uploads_raw.iterrows()]
 sel_display = st.sidebar.selectbox("Select upload to analyze:", scope_opts, key="select_upload_scope")
 sel_id = int(sel_display.split(' - ')[0]) if sel_display != 'All uploads' else None
 
 if is_admin:
     st.sidebar.subheader("Manage Submissions")
-    delete_opts_list = [
-        (f"{row['id']} - {row['filename']} ({row['category']}/{row['file_type'] or 'N/A'}) "
-         f"Imported From: {row['display_submission_date']}")
-        for index, row in df_uploads_raw.iterrows()
-    ]
+    delete_opts_list = [(f"{row['id']} - {row['filename']} ({row['category']}/{row['file_type'] or 'N/A'}) Imported From: {row['display_submission_date']}") for index, row in df_uploads_raw.iterrows()]
     delete_opts = ['Select ID to Delete'] + delete_opts_list
     del_choice_display = st.sidebar.selectbox("🗑️ Delete Submission:", delete_opts, key="delete_submission_id")
     if del_choice_display != 'Select ID to Delete':
@@ -268,23 +226,14 @@ if is_admin:
             c.execute('DELETE FROM issues WHERE upload_id=?', (del_id_val,)); c.execute('DELETE FROM uploads WHERE id=?', (del_id_val,)); conn.commit()
             st.sidebar.success(f"Deleted submission {del_id_val}."); st.rerun()
 
-df_all_issues = pd.read_sql(
-    'SELECT i.*, u.category as upload_category, u.id as upload_id_col FROM issues i JOIN uploads u ON u.id = i.upload_id',
-    conn, parse_dates=['date']
-)
-
-if df_all_issues.empty:
-    st.warning("No data in database. Please upload data."); st.stop()
+df_all_issues = pd.read_sql('SELECT i.*, u.category as upload_category, u.id as upload_id_col FROM issues i JOIN uploads u ON u.id = i.upload_id', conn, parse_dates=['date'])
+if df_all_issues.empty: st.warning("No data in database. Please upload data."); st.stop()
 
 st.sidebar.subheader("Dashboard Filters")
 min_overall_date = df_all_issues['date'].min().date() if pd.notna(df_all_issues['date'].min()) else date.today()
 max_overall_date = df_all_issues['date'].max().date() if pd.notna(df_all_issues['date'].max()) else date.today()
 
-primary_date_range = st.sidebar.date_input(
-    "Primary Date Range (Issue Dates):",
-    value=[min_overall_date, max_overall_date] if min_overall_date <= max_overall_date else [max_overall_date, min_overall_date],
-    min_value=min_overall_date, max_value=max_overall_date, key="primary_date_range_filter"
-)
+primary_date_range = st.sidebar.date_input("Primary Date Range (Issue Dates):", value=[min_overall_date, max_overall_date] if min_overall_date <= max_overall_date else [max_overall_date, min_overall_date], min_value=min_overall_date, max_value=max_overall_date, key="primary_date_range_filter")
 if not primary_date_range or len(primary_date_range) != 2: primary_date_range = [min_overall_date, max_overall_date]
 
 branch_opts = ['All'] + sorted(df_all_issues['branch'].astype(str).unique().tolist())
@@ -296,22 +245,66 @@ sel_am = st.sidebar.multiselect("Area Manager:", am_opts, default=['All'], key="
 file_type_filter_opts = ['All'] + sorted(df_all_issues['report_type'].astype(str).unique().tolist()) 
 sel_ft = st.sidebar.multiselect("File Type (Report Type):", file_type_filter_opts, default=['All'], key="file_type_filter")
 
+# ==============================================================
+# --- START: MODIFIED Period Comparison Date Input Section ---
+# ==============================================================
 st.sidebar.subheader("📊 Period Comparison")
 enable_comparison = st.sidebar.checkbox("Enable Period Comparison", key="enable_comparison_checkbox")
-comparison_date_range_1, comparison_date_range_2 = None, None
+comparison_date_range_1, comparison_date_range_2 = None, None 
+
 if enable_comparison:
     st.sidebar.markdown("**Comparison Period 1:**")
-    default_p1_end = min_overall_date + timedelta(days=6) if (min_overall_date + timedelta(days=6)) <= max_overall_date else max_overall_date
-    comparison_date_range_1 = st.sidebar.date_input("Start & End Date (Period 1):", value=[min_overall_date, default_p1_end], min_value=min_overall_date, max_value=max_overall_date, key="comparison_period1_filter")
-    st.sidebar.markdown("**Comparison Period 2:**")
-    default_p2_start = comparison_date_range_1[1] + timedelta(days=1) if comparison_date_range_1 and (comparison_date_range_1[1] + timedelta(days=1)) <= max_overall_date else min_overall_date
-    if default_p2_start > max_overall_date : default_p2_start = max_overall_date - timedelta(days=6) if (max_overall_date - timedelta(days=6)) >= min_overall_date else min_overall_date
-    default_p2_end = default_p2_start + timedelta(days=6)
-    if default_p2_end > max_overall_date: default_p2_end = max_overall_date
-    if default_p2_start > default_p2_end : default_p2_start = default_p2_end
-    comparison_date_range_2 = st.sidebar.date_input("Start & End Date (Period 2):", value=[default_p2_start, default_p2_end], min_value=min_overall_date, max_value=max_overall_date, key="comparison_period2_filter")
-    if not comparison_date_range_1 or len(comparison_date_range_1) != 2: comparison_date_range_1 = None
-    if not comparison_date_range_2 or len(comparison_date_range_2) != 2: comparison_date_range_2 = None
+    # Determine a safe default end for period 1
+    safe_default_p1_end = min_overall_date + timedelta(days=6)
+    if safe_default_p1_end > max_overall_date:
+        safe_default_p1_end = max_overall_date
+    if min_overall_date > safe_default_p1_end : # Ensure start is not after end
+        safe_default_p1_end = min_overall_date
+    
+    comparison_date_range_1_val = st.sidebar.date_input( 
+        "Start & End Date (Period 1):", 
+        value=[min_overall_date, safe_default_p1_end], 
+        min_value=min_overall_date, 
+        max_value=max_overall_date, 
+        key="comparison_period1_filter"
+    )
+
+    if comparison_date_range_1_val and len(comparison_date_range_1_val) == 2:
+        comparison_date_range_1 = comparison_date_range_1_val 
+        
+        st.sidebar.markdown("**Comparison Period 2:**")
+        default_p2_start = comparison_date_range_1[1] + timedelta(days=1) 
+        if default_p2_start > max_overall_date:
+            default_p2_start = max_overall_date - timedelta(days=6) if (max_overall_date - timedelta(days=6)) >= min_overall_date else min_overall_date
+        if default_p2_start < min_overall_date:
+            default_p2_start = min_overall_date
+        
+        default_p2_end = default_p2_start + timedelta(days=6)
+        if default_p2_end > max_overall_date: 
+            default_p2_end = max_overall_date
+        if default_p2_start > default_p2_end : 
+             default_p2_start = default_p2_end
+
+        comparison_date_range_2_val = st.sidebar.date_input(
+            "Start & End Date (Period 2):", 
+            value=[default_p2_start, default_p2_end], 
+            min_value=min_overall_date, 
+            max_value=max_overall_date, 
+            key="comparison_period2_filter"
+        )
+        if comparison_date_range_2_val and len(comparison_date_range_2_val) == 2:
+            comparison_date_range_2 = comparison_date_range_2_val 
+        else:
+            comparison_date_range_2 = None 
+            # st.sidebar.info("Select both start and end dates for Period 2.") # Optional user guidance
+    else: 
+        comparison_date_range_1 = None 
+        comparison_date_range_2 = None 
+        # st.sidebar.info("Select both start and end dates for Period 1.") # Optional user guidance
+# ==============================================================
+# --- END: MODIFIED Period Comparison Date Input Section ---
+# ==============================================================
+
 
 def apply_general_filters(df_input, sel_upload_id_val, selected_branches, selected_categories, selected_managers, selected_file_types):
     df_filtered = df_input.copy()
@@ -388,19 +381,29 @@ else:
         top_issues_primary = df_primary_period['issues'].astype(str).value_counts().head(20).rename_axis('Issue Description').reset_index(name='Frequency')
         if not top_issues_primary.empty: st.dataframe(top_issues_primary, use_container_width=True)
 
-if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
+if enable_comparison and comparison_date_range_1 and comparison_date_range_2: # This check is now more robust
     st.markdown("---"); st.header("📊 Period Comparison Results")
-    df_comp1 = df_temp_filtered.copy(); start_c1, end_c1 = comparison_date_range_1[0], comparison_date_range_1[1]
-    df_comp1 = df_comp1[(df_comp1['date'].dt.date >= start_c1) & (df_comp1['date'].dt.date <= end_c1)]
-    df_comp2 = df_temp_filtered.copy(); start_c2, end_c2 = comparison_date_range_2[0], comparison_date_range_2[1]
-    df_comp2 = df_comp2[(df_comp2['date'].dt.date >= start_c2) & (df_comp2['date'].dt.date <= end_c2)]
+    # Initialize df_comp1 and df_comp2 to avoid potential NameError if ranges are incomplete
+    df_comp1 = pd.DataFrame(columns=df_temp_filtered.columns) 
+    df_comp2 = pd.DataFrame(columns=df_temp_filtered.columns)
 
-    st.subheader(f"Period 1: {start_c1:%Y-%m-%d} to {end_c1:%Y-%m-%d} (Total: {len(df_comp1)} issues)")
-    st.subheader(f"Period 2: {start_c2:%Y-%m-%d} to {end_c2:%Y-%m-%d} (Total: {len(df_comp2)} issues)")
+    if comparison_date_range_1 and len(comparison_date_range_1) == 2: # Ensure range is valid
+        start_c1, end_c1 = comparison_date_range_1[0], comparison_date_range_1[1]
+        df_comp1 = df_temp_filtered[(df_temp_filtered['date'].dt.date >= start_c1) & (df_temp_filtered['date'].dt.date <= end_c1)].copy()
+    
+    if comparison_date_range_2 and len(comparison_date_range_2) == 2: # Ensure range is valid
+        start_c2, end_c2 = comparison_date_range_2[0], comparison_date_range_2[1]
+        df_comp2 = df_temp_filtered[(df_temp_filtered['date'].dt.date >= start_c2) & (df_temp_filtered['date'].dt.date <= end_c2)].copy()
 
-    if df_comp1.empty and df_comp2.empty:
-        st.warning("No data for either comparison period with current filters.")
-    else:
+
+    # Proceed with display only if at least one comparison dataframe has data
+    if not df_comp1.empty or not df_comp2.empty:
+        # Display titles even if one df is empty but the other is not
+        if comparison_date_range_1: 
+            st.subheader(f"Period 1: {comparison_date_range_1[0]:%Y-%m-%d} to {comparison_date_range_1[1]:%Y-%m-%d} (Total: {len(df_comp1)} issues)")
+        if comparison_date_range_2:
+            st.subheader(f"Period 2: {comparison_date_range_2[0]:%Y-%m-%d} to {comparison_date_range_2[1]:%Y-%m-%d} (Total: {len(df_comp2)} issues)")
+
         col_comp1, col_comp2 = st.columns(2)
         with col_comp1:
             st.metric(label=f"Total Issues (P1)", value=len(df_comp1))
@@ -410,25 +413,34 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
             st.metric(label=f"Total Issues (P2)", value=len(df_comp2), delta=f"{delta_val:+}" if delta_val !=0 else None)
             if not df_comp2.empty: st.dataframe(df_comp2['issues'].value_counts().nlargest(5).reset_index().rename(columns={'index':'Issue', 'issues':'Count'}), height=220, use_container_width=True)
         
-        if not df_comp1.empty or not df_comp2.empty:
+        # Branch comparison chart
+        if not df_comp1.empty or not df_comp2.empty: # Redundant check, but safe
             df_comp1_labeled = df_comp1.copy(); df_comp2_labeled = df_comp2.copy()
-            df_comp1_labeled['period_label'] = f"P1: {start_c1:%d%b}-{end_c1:%d%b}"
-            df_comp2_labeled['period_label'] = f"P2: {start_c2:%d%b}-{end_c2:%d%b}"
-            df_combined_branch = pd.concat([df_comp1_labeled, df_comp2_labeled])
-            if not df_combined_branch.empty:
-                branch_comp_data = df_combined_branch.groupby(['branch', 'period_label']).size().reset_index(name='count')
-                if not branch_comp_data.empty:
-                    fig_branch_comp = px.bar(branch_comp_data, x='branch', y='count', color='period_label', barmode='group', title='Issues by Branch (Comparison)')
-                    st.plotly_chart(fig_branch_comp, use_container_width=True)
+            if comparison_date_range_1: df_comp1_labeled['period_label'] = f"P1: {comparison_date_range_1[0]:%d%b}-{comparison_date_range_1[1]:%d%b}"
+            if comparison_date_range_2: df_comp2_labeled['period_label'] = f"P2: {comparison_date_range_2[0]:%d%b}-{comparison_date_range_2[1]:%d%b}"
             
+            # Concatenate only if dataframes are not empty and have the 'period_label'
+            dfs_to_concat = []
+            if not df_comp1_labeled.empty and 'period_label' in df_comp1_labeled.columns : dfs_to_concat.append(df_comp1_labeled)
+            if not df_comp2_labeled.empty and 'period_label' in df_comp2_labeled.columns : dfs_to_concat.append(df_comp2_labeled)
+
+            if dfs_to_concat:
+                df_combined_branch = pd.concat(dfs_to_concat)
+                if not df_combined_branch.empty:
+                    branch_comp_data = df_combined_branch.groupby(['branch', 'period_label']).size().reset_index(name='count')
+                    if not branch_comp_data.empty:
+                        fig_branch_comp = px.bar(branch_comp_data, x='branch', y='count', color='period_label', barmode='group', title='Issues by Branch (Comparison)')
+                        st.plotly_chart(fig_branch_comp, use_container_width=True)
+            
+            # Period-Level Trend Chart
             st.markdown("#### Period-Level Trend (Average Daily Issues)")
             period_summary_data = []
-            if not df_comp1.empty:
-                avg_issues_p1 = df_comp1.groupby(df_comp1['date'].dt.date).size().mean() if not df_comp1.empty else 0
-                period_summary_data.append({'Period': f"Period 1 ({start_c1:%b %d} - {end_c1:%b %d})", 'StartDate': pd.to_datetime(start_c1), 'AverageDailyIssues': round(avg_issues_p1, 2)})
-            if not df_comp2.empty:
-                avg_issues_p2 = df_comp2.groupby(df_comp2['date'].dt.date).size().mean() if not df_comp2.empty else 0
-                period_summary_data.append({'Period': f"Period 2 ({start_c2:%b %d} - {end_c2:%b %d})", 'StartDate': pd.to_datetime(start_c2), 'AverageDailyIssues': round(avg_issues_p2, 2)})
+            if comparison_date_range_1 and not df_comp1.empty:
+                avg_issues_p1 = df_comp1.groupby(df_comp1['date'].dt.date).size().mean()
+                period_summary_data.append({'Period': f"Period 1 ({comparison_date_range_1[0]:%b %d} - {comparison_date_range_1[1]:%b %d})", 'StartDate': pd.to_datetime(comparison_date_range_1[0]), 'AverageDailyIssues': round(avg_issues_p1, 2)})
+            if comparison_date_range_2 and not df_comp2.empty:
+                avg_issues_p2 = df_comp2.groupby(df_comp2['date'].dt.date).size().mean()
+                period_summary_data.append({'Period': f"Period 2 ({comparison_date_range_2[0]:%b %d} - {comparison_date_range_2[1]:%b %d})", 'StartDate': pd.to_datetime(comparison_date_range_2[0]), 'AverageDailyIssues': round(avg_issues_p2, 2)})
             
             if len(period_summary_data) >= 1:
                 df_period_trend = pd.DataFrame(period_summary_data).sort_values('StartDate')
@@ -440,7 +452,10 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                     fig_period_level_trend.update_traces(texttemplate='%{text:.2f}', textposition='top center')
                 fig_period_level_trend.update_layout(xaxis_title="Comparison Period", yaxis_title="Avg. Daily Issues", template="plotly_white")
                 st.plotly_chart(fig_period_level_trend, use_container_width=True)
-            else: st.info("Not enough data for period-level trend.")
+            else: st.info("Not enough data for period-level trend (ensure periods have data).")
+    else: # This else corresponds to (df_comp1.empty and df_comp2.empty)
+        st.warning("No data found for either comparison period with the current general filters.")
+
 
 st.sidebar.subheader("Downloads")
 if not df_primary_period.empty:
@@ -487,15 +502,16 @@ else: st.sidebar.info("No primary period data to download.")
 if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
     df_comp1_exists = 'df_comp1' in locals() and not df_comp1.empty
     df_comp2_exists = 'df_comp2' in locals() and not df_comp2.empty
-    start_c1_str = start_c1.strftime('%Y%m%d') if 'start_c1' in locals() else "P1" 
-    end_c1_str = end_c1.strftime('%Y%m%d') if 'end_c1' in locals() else ""
-    start_c2_str = start_c2.strftime('%Y%m%d') if 'start_c2' in locals() else "P2"
-    end_c2_str = end_c2.strftime('%Y%m%d') if 'end_c2' in locals() else ""
+    start_c1_str = comparison_date_range_1[0].strftime('%Y%m%d') if df_comp1_exists and comparison_date_range_1 else "P1"
+    end_c1_str = comparison_date_range_1[1].strftime('%Y%m%d') if df_comp1_exists and comparison_date_range_1 else ""
+    start_c2_str = comparison_date_range_2[0].strftime('%Y%m%d') if df_comp2_exists and comparison_date_range_2 else "P2"
+    end_c2_str = comparison_date_range_2[1].strftime('%Y%m%d') if df_comp2_exists and comparison_date_range_2 else ""
+
 
     if df_comp1_exists:
-        st.sidebar.download_button(f"CSV (Comp P1: {start_c1:%b%d}-{end_c1:%b%d})", df_comp1.to_csv(index=False).encode('utf-8'), f"comp_p1_{start_c1_str}-{end_c1_str}.csv", "text/csv", key="dl_csv_comp1")
+        st.sidebar.download_button(f"CSV (Comp P1: {comparison_date_range_1[0]:%b%d}-{comparison_date_range_1[1]:%b%d})", df_comp1.to_csv(index=False).encode('utf-8'), f"comp_p1_{start_c1_str}-{end_c1_str}.csv", "text/csv", key="dl_csv_comp1")
     if df_comp2_exists:
-        st.sidebar.download_button(f"CSV (Comp P2: {start_c2:%b%d}-{end_c2:%b%d})", df_comp2.to_csv(index=False).encode('utf-8'), f"comp_p2_{start_c2_str}-{end_c2_str}.csv", "text/csv", key="dl_csv_comp2")
+        st.sidebar.download_button(f"CSV (Comp P2: {comparison_date_range_2[0]:%b%d}-{comparison_date_range_2[1]:%b%d})", df_comp2.to_csv(index=False).encode('utf-8'), f"comp_p2_{start_c2_str}-{end_c2_str}.csv", "text/csv", key="dl_csv_comp2")
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Database: {DB_PATH}")
