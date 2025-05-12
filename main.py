@@ -78,7 +78,7 @@ if not check_login(): st.stop()
 # --- Title with Logo ---
 logo_path = "company_logo.png"  # Or "assets/company_logo.png" if in a subdirectory
 
-col1_title, col2_title = st.columns([1, 6]) # Adjust column ratios as needed [logo_width, title_width]
+col1_title, col2_title = st.columns([2, 6]) # Adjust column ratios as needed [logo_width, title_width]
 
 with col1_title:
     try:
