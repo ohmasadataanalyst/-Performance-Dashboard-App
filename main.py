@@ -75,7 +75,22 @@ def check_login():
     return True
 if not check_login(): st.stop()
 
-st.title("📊 Classic Dashboard for Performance")
+# --- Title with Logo ---
+logo_path = "company_logo.png"  # Or "assets/company_logo.png" if in a subdirectory
+
+col1_title, col2_title = st.columns([1, 6]) # Adjust column ratios as needed [logo_width, title_width]
+
+with col1_title:
+    try:
+        st.image(logo_path, width=70) # Adjust width as needed
+    except FileNotFoundError:
+        st.error(f"Logo image not found at {logo_path}. Please check the path.")
+    except Exception as e:
+        st.error(f"Error loading logo: {e}")
+
+
+with col2_title:
+    st.title("📊 Classic Dashboard for Performance")
 user_name_display = st.session_state.get('user_name', "N/A").title()
 user_role_display = st.session_state.get('user_role', "N/A")
 st.sidebar.success(f"Logged in as: {user_name_display} ({user_role_display})")
