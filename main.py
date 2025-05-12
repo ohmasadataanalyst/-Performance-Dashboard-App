@@ -78,7 +78,7 @@ def check_login():
         st.session_state.authenticated = False; st.session_state.user_name = None; st.session_state.user_role = None
     if not st.session_state.authenticated:
         # --- Login Page Title with Logo ---
-        col1_login_title, col2_login_title = st.columns([4, 6]) # Adjust ratios if needed
+        col1_login_title, col2_login_title = st.columns([1, 6]) # Adjust ratios if needed
         with col1_login_title:
             try:
                 st.image(LOGO_PATH_LOGIN, width=200) # Adjust width
