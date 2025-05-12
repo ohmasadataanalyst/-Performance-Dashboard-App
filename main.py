@@ -78,11 +78,11 @@ if not check_login(): st.stop()
 # --- Title with Logo ---
 logo_path = "company_logo.png"  # Or "assets/company_logo.png" if in a subdirectory
 
-col1_title, col2_title = st.columns([6, 6]) # Adjust column ratios as needed [logo_width, title_width]
+col1_title, col2_title = st.columns([1, 6]) # Adjust column ratios as needed [logo_width, title_width]
 
 with col1_title:
     try:
-        st.image(logo_path, width=70) # Adjust width as needed
+        st.image(logo_path, width=120) # Adjust width as needed
     except FileNotFoundError:
         st.error(f"Logo image not found at {logo_path}. Please check the path.")
     except Exception as e:
