@@ -58,7 +58,7 @@ def check_login():
     if 'authenticated' not in st.session_state:
         st.session_state.authenticated = False; st.session_state.user_name = None; st.session_state.user_role = None
     if not st.session_state.authenticated:
-        st.title("📊 Login - Performance Dashboard"); st.subheader("Please log in to continue")
+        st.title("📊 Login -  Dashboard"); st.subheader("Please log in to continue")
         with st.form("login_form"):
             username = st.text_input("Full Name:", key="auth_username").strip().lower()
             password = st.text_input("Password:", type="password", key="auth_password")
@@ -78,7 +78,7 @@ if not check_login(): st.stop()
 # --- Title with Logo ---
 logo_path = "company_logo.png"  # Or "assets/company_logo.png" if in a subdirectory
 
-col1_title, col2_title = st.columns([1, 6]) # Adjust column ratios as needed [logo_width, title_width]
+col1_title, col2_title = st.columns([6, 6]) # Adjust column ratios as needed [logo_width, title_width]
 
 with col1_title:
     try:
