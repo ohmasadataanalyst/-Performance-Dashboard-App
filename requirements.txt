@@ -5,5 +5,3 @@ plotly
 bcrypt
 pdfkit
 kaleido
-SQLAlchemy 
-python-dotenv
