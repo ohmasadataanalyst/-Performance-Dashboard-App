@@ -31,6 +31,19 @@ c.execute('''CREATE TABLE IF NOT EXISTS issues (
     report_type TEXT, 
     FOREIGN KEY(upload_id) REFERENCES uploads(id) ON DELETE CASCADE 
 )''')
+# --- NEW: Create cctv_issues table ---
+c.execute('''CREATE TABLE IF NOT EXISTS cctv_issues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+    upload_id INTEGER, 
+    code TEXT,                      -- Branch code from CCTV Excel
+    violation TEXT,                 -- 'Choose the violation - اختر المخالفه'
+    shift TEXT,                     -- 'Choose the shift - اختر الشفت'
+    date_submitted TEXT,            -- 'Date Submitted' from CCTV Excel (this is the primary date for these)
+    branch_name TEXT,               -- Normalized branch name
+    area_manager TEXT,
+    report_type TEXT,               -- File type selected for the upload batch
+    FOREIGN KEY(upload_id) REFERENCES uploads(id) ON DELETE CASCADE 
+)''')
 conn.commit()
 
 try:
@@ -42,7 +55,6 @@ try:
         if 'db_schema_updated_flag' not in st.session_state:
             st.session_state.db_schema_updated_flag = True
 except sqlite3.OperationalError as e:
-    # Only set critical error if it's not the "duplicate column" error and hasn't been set before
     if "duplicate column name" not in str(e).lower() and 'db_critical_error_msg' not in st.session_state :
         st.session_state.db_critical_error_msg = f"Failed to update 'uploads' table schema: {e}"
 
@@ -53,10 +65,9 @@ db_admin = {
     "mohamed hattab": b"$2b$12$X5hWO55U9Y0RobP9Mk7t3eW3AK.6uNajas8SkuxgY8zEwgY/bYIqe"
 }
 view_only = ["mohamed emad", "mohamed houider", "sujan podel", "ali ismail", "islam mostafa"]
-
 category_file_types = {
     'operation-training': ['opening', 'closing', 'handover', 'store arranging', 'tempreature of heaters', 'defrost', 'clean AC'],
-    'CCTV': ['issues', 'submission time'], # These are nominal file types for CCTV category, actual processing is different
+    'CCTV': ['issues', 'submission time'], 
     'complaints': ['performance', 'اغلاق الشكاوي'], 
     'missing': ['performance'],
     'visits': [], 
@@ -66,47 +77,25 @@ all_categories = list(category_file_types.keys())
 
 # --- YOU MUST COMPLETE THIS BRANCH CODE MAP ---
 BRANCH_CODE_MAP = {
-    "NURUH B01": "Nuzhah - النزهة",
-    "KHRUH B02": "Alkaleej - الخليج",
-    "GHRUH B03": "Gurnatah - غرناطة",
-    "NSRUH B04": "Alnaseem Riyadh- النسيم الرياض",
-    "RAWRUH B05": "Alrawabi - الروابي",
-    "DARUH B06": "Aldaraiah - الدرعية",
-    "LBRUH B07": "Wadi Laban Riyadh - وادي لبن الرياض",
-    "SWRUH B08": "Alsweedi - السويدي",
-    "AZRUH B09": "Alaziziah - العزيزية",
-    "SHRUH B10": "Alshifa - الشفاء",
-    "NRRUH B11": "Alnargis - النرجس",
-    "TWRUH B12": "Twuaiq - طويق",
-    "AQRUH B13": "Al Aqiq - العقيق", # Example - Please verify/add all
-    "RBRUH B14": "Alrabea - الربيع",
-    "NDRUH B15": "Nad Al Hamar", # Example
-    "BDRUH B16": "Albadeah - البديعة",
-    "QRRUH B17": "Alqairawan - القيروان",
-    "TKRUH B18": "Takhasussi Riyadh - التخصصي الرياض",
-    "MURUH B19": "Alremal - الرمال", 
-    "KRRUH B21": "Alkharj - الخرج",
-    "OBJED B22": "Obhur Branch - فرع ابحر",
-    "SLAHS B23": "Al Sulimaniyah Al Hofuf - السلمانية الهفوف",
-    "SFJED B24": "Alsafa Jeddah - الصفا جدة",
-    "RWAHS B25": "Al Rawdha Al Hofuf - الروضة الهفوف",
-    "HAJED B26": "Al Hamadaniyyah  - الحمدانية",
-    "SARUH B27": "Alsaadah branch - فرع السعادة",
-    "MAJED B28": "Almarwah branch - فرع المروة",
-    "EVENT B29": "Event Location B29", # Example for Event B29
-    "QADRUH B30": "Al Qadisiyyah branch - فرع القادسية",
-    "ANRUH B31": "Anas Ibn Malik - انس ابن مالك",
-    "FAYJED B32": "Alfayha branch - فرع الفيحاء",
-    "HIRJED B33": "Hira Jeddah", # Example
-    "URURUH B34": "Al Urubah Branch - فرع العروبة",
-    "LB01": "Lubda - لبدة", 
-    "LB02": "Alkhaleej Branch LB02", # Verify if this code is distinct from KHRUH B02
+    "NURUH B01": "Nuzhah - النزهة", "KHRUH B02": "Alkaleej - الخليج", "GHRUH B03": "Gurnatah - غرناطة",
+    "NSRUH B04": "Alnaseem Riyadh- النسيم الرياض", "RAWRUH B05": "Alrawabi - الروابي", "DARUH B06": "Aldaraiah - الدرعية",
+    "LBRUH B07": "Wadi Laban Riyadh - وادي لبن الرياض", "SWRUH B08": "Alsweedi - السويدي", "AZRUH B09": "Alaziziah - العزيزية",
+    "SHRUH B10": "Alshifa - الشفاء", "NRRUH B11": "Alnargis - النرجس", "TWRUH B12": "Twuaiq - طويق",
+    "AQRUH B13": "Al Aqiq - العقيق", "RBRUH B14": "Alrabea - الربيع", "NDRUH B15": "Nad Al Hamar", 
+    "BDRUH B16": "Albadeah - البديعة", "QRRUH B17": "Alqairawan - القيروان", "TKRUH B18": "Takhasussi Riyadh - التخصصي الرياض",
+    "MURUH B19": "Alremal - الرمال", "KRRUH B21": "Alkharj - الخرج", "OBJED B22": "Obhur Branch - فرع ابحر",
+    "SLAHS B23": "Al Sulimaniyah Al Hofuf - السلمانية الهفوف", "SFJED B24": "Alsafa Jeddah - الصفا جدة",
+    "RWAHS B25": "Al Rawdha Al Hofuf - الروضة الهفوف", "HAJED B26": "Al Hamadaniyyah  - الحمدانية",
+    "SARUH B27": "Alsaadah branch - فرع السعادة", "MAJED B28": "Almarwah branch - فرع المروة",
+    "EVENT B29": "Event Location B29", "QADRUH B30": "Al Qadisiyyah branch - فرع القادسية",
+    "ANRUH B31": "Anas Ibn Malik - انس ابن مالك", "FAYJED B32": "Alfayha branch - فرع الفيحاء",
+    "HIRJED B33": "Hira Jeddah", "URURUH B34": "Al Urubah Branch - فرع العروبة",
+    "LB01": "Lubda - لبدة", "LB02": "Alkhaleej Branch LB02", 
     "QB01": "Shawarma Garatis As Suwaidi - شاورما قراطيس السويدي",
     "QB02": "Shawarma Garatis Alnargis B02 -  B02 شاورما قراطيس النرجس",
     "TW01": "Twesste"
-    # Add ALL your mappings here. Keys should be uppercase and stripped.
+    # Ensure all codes from your CCTV files (uppercase, stripped) are keys here
 }
-
 
 if 'db_critical_error_msg' in st.session_state:
     st.error(f"DB Startup Error: {st.session_state.db_critical_error_msg}"); del st.session_state.db_critical_error_msg
@@ -170,21 +159,20 @@ st.sidebar.header("🔍 Filters & Options")
 if is_admin:
     st.sidebar.subheader("Admin Controls")
     st.sidebar.markdown("Set parameters, select Excel, specify import date range, then upload.")
-    selected_category_val = st.sidebar.selectbox("Category for upload", options=all_categories, key="admin_category_select") # Renamed to avoid conflict
-    valid_file_types = category_file_types.get(selected_category_val, []) # Use current value
-    selected_file_type_val = st.sidebar.selectbox("File type for upload", options=valid_file_types, key="admin_file_type_select", disabled=(not valid_file_types), help="Options change based on category.") # Renamed
+    selected_category_val = st.sidebar.selectbox("Category for upload", options=all_categories, key="admin_category_select_widget")
+    valid_file_types = category_file_types.get(selected_category_val, [])
+    selected_file_type_val = st.sidebar.selectbox("File type for upload", options=valid_file_types, key="admin_file_type_select_widget", disabled=(not valid_file_types), help="Options change based on category.")
     st.sidebar.markdown("**Filter Excel Data by Date Range for this Import:**")
-    import_from_date_val = st.sidebar.date_input("Import Data From Date:", value=date.today() - timedelta(days=7), key="import_from_date_upload")
-    import_to_date_val = st.sidebar.date_input("Import Data To Date:", value=date.today(), key="import_to_date_upload")
-    up = st.sidebar.file_uploader("Upload Excel File (.xlsx)", type=["xlsx"], key="excel_uploader")
+    import_from_date_widget_val = st.sidebar.date_input("Import Data From Date:", value=date.today() - timedelta(days=7), key="import_from_date_upload_widget")
+    import_to_date_widget_val = st.sidebar.date_input("Import Data To Date:", value=date.today(), key="import_to_date_upload_widget")
+    up = st.sidebar.file_uploader("Upload Excel File (.xlsx)", type=["xlsx"], key="excel_uploader_widget")
     upload_btn = st.sidebar.button("Upload Data", key="upload_data_button")
 
     if upload_btn: 
-        # Use the values from the widgets directly or from session state if needed for complex callbacks (not needed here)
         final_category = selected_category_val
         final_file_type = selected_file_type_val
-        imp_from_dt = import_from_date_val
-        imp_to_dt = import_to_date_val 
+        imp_from_dt = import_from_date_widget_val
+        imp_to_dt = import_to_date_widget_val 
 
         requires_file_type = bool(category_file_types.get(final_category, []))
         if requires_file_type and not final_file_type: st.sidebar.warning(f"Please select a file type for '{final_category}'.")
@@ -195,157 +183,196 @@ if is_admin:
             if not requires_file_type: final_file_type = None 
             excel_data_bytes = up.getvalue()
             ts_now = datetime.now()
-            upload_submission_date = imp_from_dt # This is the 'submission_date' for the uploads table
+            upload_submission_date_for_uploads_table = imp_from_dt 
             
             try:
-                with conn: # Manages commit/rollback for SQLite
+                with conn: 
                     c.execute('SELECT COUNT(*) FROM uploads WHERE filename=? AND uploader=? AND file_type IS ? AND category=? AND submission_date=?',
-                              (up.name, current_user, final_file_type, final_category, upload_submission_date.isoformat()))
+                              (up.name, current_user, final_file_type, final_category, upload_submission_date_for_uploads_table.isoformat()))
                     if c.fetchone()[0] > 0: 
-                        st.sidebar.warning(f"Upload batch for '{up.name}' (Cat: {final_category}, Type: {final_file_type}, From: {upload_submission_date.isoformat()}) seems duplicate.")
+                        st.sidebar.warning(f"Upload batch for '{up.name}' (Cat: {final_category}, Type: {final_file_type}, From: {upload_submission_date_for_uploads_table.isoformat()}) seems duplicate.")
                     else:
+                        c.execute('INSERT INTO uploads (filename, uploader, timestamp, file_type, category, submission_date, file) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                                  (up.name, current_user, ts_now.isoformat(), final_file_type, final_category, upload_submission_date_for_uploads_table.isoformat(), sqlite3.Binary(excel_data_bytes)))
+                        upload_id = c.lastrowid 
+
                         df_excel_full = pd.read_excel(io.BytesIO(excel_data_bytes))
                         df_excel_full.columns = [col.strip().lower() for col in df_excel_full.columns]
                         
-                        issues_to_insert_tuples = [] # Store (code, issues, branch, area_manager, date_str, report_type_for_issue)
-
                         if final_category == 'CCTV':
                             st.sidebar.info("Processing CCTV file format...")
-                            cctv_required_cols = ['code', 'choose the violation - اختر المخالفه', 'date submitted', 'area manager']
-                            missing_cctv_cols = [col for col in cctv_required_cols if col not in df_excel_full.columns]
+                            cctv_req_cols = ['code', 'choose the violation - اختر المخالفه', 'date submitted', 'area manager']
+                            missing_cctv_cols = [col for col in cctv_req_cols if col not in df_excel_full.columns]
                             if missing_cctv_cols:
-                                st.sidebar.error(f"CCTV Excel missing: {', '.join(missing_cctv_cols)}. Aborted.")
+                                st.sidebar.error(f"CCTV Excel missing: {', '.join(missing_cctv_cols)}. Upload rolled back.")
+                                c.execute("DELETE FROM uploads WHERE id=?", (upload_id,)) # Rollback preliminary uploads insert
                             else:
                                 df_excel_full['parsed_date'] = pd.to_datetime(df_excel_full['date submitted'], errors='coerce')
                                 original_len = len(df_excel_full); df_excel_full.dropna(subset=['parsed_date'], inplace=True)
                                 if len(df_excel_full) < original_len: st.sidebar.warning(f"{original_len - len(df_excel_full)} CCTV rows dropped (invalid 'date submitted').")
-                                if df_excel_full.empty: st.sidebar.error("No valid CCTV data. Aborted.")
+                                if df_excel_full.empty: st.sidebar.error("No valid CCTV data rows. Upload rolled back.")
                                 else:
                                     df_to_import = df_excel_full[(df_excel_full['parsed_date'].dt.date >= imp_from_dt) & (df_excel_full['parsed_date'].dt.date <= imp_to_dt)].copy()
                                     if df_to_import.empty: st.sidebar.info(f"No CCTV rows in '{up.name}' for import range.")
                                     else:
+                                        cctv_issues_to_insert_tuples = []
                                         for _, row in df_to_import.iterrows():
-                                            issue_text = row['choose the violation - اختر المخالفه']
-                                            if 'choose the shift - اختر الشفت' in row and pd.notna(row['choose the shift - اختر الشفت']):
-                                                issue_text += f" (Shift: {row['choose the shift - اختر الشفت']})"
+                                            violation = row['choose the violation - اختر المخالفه']
+                                            shift = row.get('choose the shift - اختر الشفت', None) 
                                             branch_code_excel = str(row['code']).strip().upper()
-                                            branch_name = BRANCH_CODE_MAP.get(branch_code_excel, str(row.get('branch', branch_code_excel))).strip() # Fallback
-                                            issues_to_insert_tuples.append((
-                                                row['code'], issue_text, branch_name, row['area manager'],
-                                                row['parsed_date'].strftime('%Y-%m-%d'), final_file_type 
+                                            branch_name = BRANCH_CODE_MAP.get(branch_code_excel, str(row.get('branch', branch_code_excel))).strip() 
+                                            cctv_issues_to_insert_tuples.append((
+                                                upload_id, branch_code_excel, violation, shift,
+                                                row['parsed_date'].strftime('%Y-%m-%d'), 
+                                                branch_name, row['area manager'], final_file_type
                                             ))
-                        else: # Standard processing for other categories
+                                        if cctv_issues_to_insert_tuples:
+                                            c.executemany('''INSERT INTO cctv_issues 
+                                                             (upload_id, code, violation, shift, date_submitted, branch_name, area_manager, report_type) 
+                                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', cctv_issues_to_insert_tuples)
+                                            st.sidebar.success(f"Imported {len(cctv_issues_to_insert_tuples)} CCTV issues from '{up.name}'."); st.rerun()
+                        else: # Standard Processing
                             required_cols = ['code', 'issues', 'branch', 'area manager', 'date']
                             missing_cols = [col for col in required_cols if col not in df_excel_full.columns]
-                            if missing_cols: st.sidebar.error(f"Excel missing: {', '.join(missing_cols)}. Aborted.")
+                            if missing_cols: 
+                                st.sidebar.error(f"Excel missing: {', '.join(missing_cols)}. Upload rolled back.")
+                                c.execute("DELETE FROM uploads WHERE id=?", (upload_id,))
                             else:
                                 df_excel_full['parsed_date'] = pd.to_datetime(df_excel_full['date'], dayfirst=True, errors='coerce')
                                 original_len = len(df_excel_full); df_excel_full.dropna(subset=['parsed_date'], inplace=True)
                                 if len(df_excel_full) < original_len: st.sidebar.warning(f"{original_len - len(df_excel_full)} rows dropped (invalid date).")
-                                if df_excel_full.empty: st.sidebar.error("No valid data rows in Excel. Aborted.")
+                                if df_excel_full.empty: st.sidebar.error("No valid data rows in Excel. Upload rolled back.")
                                 else:
                                     df_to_import = df_excel_full[(df_excel_full['parsed_date'].dt.date >= imp_from_dt) & (df_excel_full['parsed_date'].dt.date <= imp_to_dt)].copy()
                                     if df_to_import.empty: st.sidebar.info(f"No rows in '{up.name}' for import range.")
                                     else:
+                                        standard_issues_to_insert_tuples = []
                                         for _, row in df_to_import.iterrows():
-                                            issues_to_insert_tuples.append((
-                                                row['code'], row['issues'], str(row['branch']).strip(), row['area manager'],
-                                                row['parsed_date'].strftime('%Y-%m-%d'), final_file_type
+                                            standard_issues_to_insert_tuples.append((
+                                                upload_id, row['code'], row['issues'], str(row['branch']).strip(), 
+                                                row['area manager'], row['parsed_date'].strftime('%Y-%m-%d'), final_file_type
                                             ))
-                        
-                        if issues_to_insert_tuples:
-                            c.execute('INSERT INTO uploads (filename, uploader, timestamp, file_type, category, submission_date, file) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                                      (up.name, current_user, ts_now.isoformat(), final_file_type, final_category, upload_submission_date.isoformat(), sqlite3.Binary(excel_data_bytes)))
-                            upload_id = c.lastrowid 
-                            
-                            batch_issue_data_for_db = [(upload_id,) + issue_tuple for issue_tuple in issues_to_insert_tuples]
-                            c.executemany('INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                                          batch_issue_data_for_db)
-                            # conn.commit() # Managed by 'with conn:'
-                            st.sidebar.success(f"Imported {len(issues_to_insert_tuples)} issues from '{up.name}'.")
-                            st.rerun()
-                        # If issues_to_insert_tuples is empty but no column errors occurred earlier for this path
-                        elif not ('missing_cctv_cols' in locals() and missing_cctv_cols) and not ('missing_cols' in locals() and missing_cols):
-                             st.sidebar.info(f"No issues to import from '{up.name}' after processing and date filtering for the selected category.")
+                                        if standard_issues_to_insert_tuples:
+                                            c.executemany('''INSERT INTO issues 
+                                                             (upload_id, code, issues, branch, area_manager, date, report_type) 
+                                                             VALUES (?, ?, ?, ?, ?, ?, ?)''', standard_issues_to_insert_tuples)
+                                            st.sidebar.success(f"Imported {len(standard_issues_to_insert_tuples)} issues from '{up.name}'."); st.rerun()
+                        # If no issues were inserted after successful parsing (e.g. all out of date range)
+                        # Check if any issue list was populated
+                        no_cctv_issues = 'cctv_issues_to_insert_tuples' not in locals() or not cctv_issues_to_insert_tuples
+                        no_std_issues = 'standard_issues_to_insert_tuples' not in locals() or not standard_issues_to_insert_tuples
+                        no_parse_errors = not ('missing_cctv_cols' in locals() and missing_cctv_cols) and \
+                                          not ('missing_cols' in locals() and missing_cols)
+
+                        if no_cctv_issues and no_std_issues and no_parse_errors:
+                             st.sidebar.info(f"No issues found within the import date range in '{up.name}'. The upload batch entry was created but no specific issues were added.")
+                             # No st.rerun() here if nothing was actually added to issues tables, to avoid clearing the message
 
             except sqlite3.Error as e_sql: 
-                st.sidebar.error(f"DB error during upload: {e_sql}. Transaction rolled back if started.") # Rollback is auto with 'with conn:'
+                st.sidebar.error(f"DB error during upload: {e_sql}. Transaction implicitly rolled back.")
             except Exception as e_general: 
-                st.sidebar.error(f"Error processing file '{up.name}': {e_general}. Transaction rolled back if started.")
-
+                st.sidebar.error(f"Error processing file '{up.name}': {e_general}. Transaction implicitly rolled back if started.")
 
     # --- Manage Submissions (Delete) ---
     st.sidebar.subheader("Manage Submissions")
-    # Fetch df_uploads again here if list might have changed due to new upload before delete section runs
     df_uploads_for_delete = pd.read_sql('SELECT id, filename, uploader, timestamp, file_type, category, submission_date FROM uploads ORDER BY submission_date DESC, timestamp DESC', conn) 
     df_uploads_for_delete['display_submission_date_fmt'] = df_uploads_for_delete['submission_date'].apply(lambda d: datetime.strptime(str(d),'%Y-%m-%d').strftime('%Y-%m-%d') if pd.notna(d) else "N/A")
     delete_opts_list = [(f"{row['id']} - {row['filename']} ({row['category']}/{row['file_type'] or 'N/A'}) Imp.From: {row['display_submission_date_fmt']}") for index, row in df_uploads_for_delete.iterrows()]
     delete_opts = ['Select ID to Delete'] + delete_opts_list
-    del_choice_display = st.sidebar.selectbox("🗑️ Delete Submission Batch:", delete_opts, key="delete_submission_id_select") # Unique key
+    del_choice_display = st.sidebar.selectbox("🗑️ Delete Submission Batch:", delete_opts, key="delete_submission_id_select_widget")
     if del_choice_display != 'Select ID to Delete':
         del_id_val = int(del_choice_display.split(' - ')[0])
-        if st.sidebar.button(f"Confirm Delete Submission #{del_id_val}", key=f"confirm_del_btn_{del_id_val}", type="primary"): # Unique key
+        if st.sidebar.button(f"Confirm Delete Submission #{del_id_val}", key=f"confirm_del_btn_{del_id_val}_widget", type="primary"):
             try:
-                with conn: # Manage transaction
-                    c.execute('DELETE FROM uploads WHERE id=?', (del_id_val,)) # ON DELETE CASCADE handles issues
+                with conn: c.execute('DELETE FROM uploads WHERE id=?', (del_id_val,))
                 st.sidebar.success(f"Deleted submission batch {del_id_val}."); st.rerun()
-            except sqlite3.Error as e: 
-                st.sidebar.error(f"Failed to delete: {e}") # Rollback auto with 'with conn:'
+            except sqlite3.Error as e: st.sidebar.error(f"Failed to delete: {e}")
     
     # --- Database Backup Download Section ---
     st.sidebar.subheader("Database Management")
-    st.sidebar.markdown(
-        """**To persist data (e.g., on Streamlit Cloud):** After uploads/deletions, "Download Database Backup", rename to `issues.db`, replace in local Git, then commit & push."""
-    )
+    st.sidebar.markdown( """**To persist data (e.g., on Streamlit Cloud):** After uploads/deletions, "Download Database Backup", rename to `issues.db`, replace in local Git, then commit & push.""" )
     if os.path.exists(DB_PATH):
         with open(DB_PATH, "rb") as fp: db_file_bytes = fp.read() 
         current_timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S"); backup_db_filename = f"issues_backup_{current_timestamp_str}.db"
         st.sidebar.download_button(label="Download Database Backup", data=db_file_bytes, file_name=backup_db_filename,
-                                   mime="application/vnd.sqlite3", key="download_db_now_button", # Changed key
+                                   mime="application/vnd.sqlite3", key="download_db_button_widget", 
                                    help=f"Downloads current '{DB_PATH}'. Rename to '{os.path.basename(DB_PATH)}' for Git commit.")
-    else: st.sidebar.warning(f"'{DB_PATH}' not found. Upload data or ensure initial DB is in repo.")
+    else: st.sidebar.warning(f"'{DB_PATH}' not found. Cannot offer download.")
 
 # --- Main Data Loading & Filtering ---
 default_wk = shutil.which('wkhtmltopdf') or 'not found'
 wk_path = st.sidebar.text_input("wkhtmltopdf path:", default_wk)
 
 df_uploads_raw_main = pd.read_sql('SELECT id, filename, uploader, timestamp, file_type, category, submission_date FROM uploads ORDER BY submission_date DESC, timestamp DESC', conn)
-def format_display_date(d): return datetime.strptime(str(d),'%Y-%m-%d').strftime('%Y-%m-%d') if pd.notna(d) else "N/A" # Should be safe
+def format_display_date(d_str): # Expects ISO string
+    try: return datetime.strptime(d_str,'%Y-%m-%d').strftime('%Y-%m-%d') if pd.notna(d_str) else "N/A"
+    except (ValueError, TypeError): return "N/A" # Handle if not string or wrong format
 df_uploads_raw_main['display_submission_date_fmt'] = df_uploads_raw_main['submission_date'].apply(format_display_date)
 
 st.sidebar.subheader("Data Scope")
 scope_opts = ['All uploads'] + [(f"{r['id']} - {r['filename']} ({r['category']}/{r['file_type'] or 'N/A'}) Imp.From: {r['display_submission_date_fmt']}") for i,r in df_uploads_raw_main.iterrows()]
-sel_display = st.sidebar.selectbox("Select upload batch to analyze:", scope_opts, key="select_upload_scope_main")
+sel_display = st.sidebar.selectbox("Select upload batch to analyze:", scope_opts, key="select_upload_scope_main_widget")
 sel_id = int(sel_display.split(' - ')[0]) if sel_display != 'All uploads' else None
 
-df_all_issues = pd.read_sql('SELECT i.*, u.category as upload_category, u.id as upload_id_col FROM issues i JOIN uploads u ON u.id = i.upload_id', conn, parse_dates=['date'])
-if df_all_issues.empty: st.warning("No issues data in database."); st.stop()
+# --- Modified Data Fetching for Dashboard ---
+df_standard_issues = pd.read_sql(
+    '''SELECT i.id as issue_id, i.upload_id, i.code, i.issues, i.branch, i.area_manager, i.date, i.report_type, 
+           u.category as upload_category, u.id as upload_id_col 
+       FROM issues i JOIN uploads u ON u.id = i.upload_id''', conn, parse_dates=['date'])
+
+df_cctv_issues_raw = pd.read_sql(
+    '''SELECT c.id as issue_id, c.upload_id, c.code, c.violation, c.shift, c.date_submitted, c.branch_name, c.area_manager, c.report_type,
+           u.category as upload_category, u.id as upload_id_col
+       FROM cctv_issues c JOIN uploads u ON u.id = c.upload_id''', conn, parse_dates=['date_submitted'])
+
+df_cctv_issues_processed = pd.DataFrame()
+if not df_cctv_issues_raw.empty:
+    df_cctv_issues_processed = df_cctv_issues_raw.copy()
+    df_cctv_issues_processed.rename(columns={'violation': 'issues', 'date_submitted': 'date', 'branch_name': 'branch'}, inplace=True)
+    if 'shift' in df_cctv_issues_processed.columns and 'issues' in df_cctv_issues_processed.columns:
+         df_cctv_issues_processed['issues'] = df_cctv_issues_processed.apply(lambda row: f"{row['issues']} (Shift: {row['shift']})" if pd.notna(row['shift']) else row['issues'], axis=1)
+    common_cols_for_display = ['issue_id', 'upload_id', 'code', 'issues', 'branch', 'area_manager', 'date', 'report_type', 'upload_category', 'upload_id_col']
+    df_cctv_issues_processed = df_cctv_issues_processed[[col for col in common_cols_for_display if col in df_cctv_issues_processed.columns]]
+
+df_all_issues_list = []
+if not df_standard_issues.empty: df_all_issues_list.append(df_standard_issues)
+if not df_cctv_issues_processed.empty: df_all_issues_list.append(df_cctv_issues_processed)
+
+if df_all_issues_list:
+    df_all_issues = pd.concat(df_all_issues_list, ignore_index=True)
+    if 'date' in df_all_issues.columns: df_all_issues['date'] = pd.to_datetime(df_all_issues['date'], errors='coerce')
+    if df_all_issues.empty or ('date' in df_all_issues.columns and df_all_issues['date'].isnull().all()):
+        st.warning("No issues data with valid dates available after combining sources."); st.stop()
+else:
+    st.warning("No issues data found in database (standard or CCTV)."); st.stop()
+# --- End Modified Data Fetching ---
+
 
 st.sidebar.subheader("Dashboard Filters")
 min_overall_date = df_all_issues['date'].min().date() if pd.notna(df_all_issues['date'].min()) else date.today()
 max_overall_date = df_all_issues['date'].max().date() if pd.notna(df_all_issues['date'].max()) else date.today()
-primary_date_range_val = [min_overall_date, max_overall_date] if min_overall_date <= max_overall_date else [max_overall_date, min_overall_date] # Ensure start <= end
-primary_date_range = st.sidebar.date_input("Primary Date Range (Issue Dates):", value=primary_date_range_val, min_value=min_overall_date, max_value=max_overall_date, key="primary_date_range_filter")
+primary_date_range_val = [min_overall_date, max_overall_date] if min_overall_date <= max_overall_date else [max_overall_date, min_overall_date]
+primary_date_range = st.sidebar.date_input("Primary Date Range (Issue Dates):", value=primary_date_range_val, min_value=min_overall_date, max_value=max_overall_date, key="primary_date_range_filter_widget")
 if not primary_date_range or len(primary_date_range) != 2: primary_date_range = primary_date_range_val
 
-branch_opts = ['All'] + sorted(df_all_issues['branch'].astype(str).unique().tolist()); sel_branch = st.sidebar.multiselect("Branch:", branch_opts, default=['All'], key="branch_filter")
-cat_opts = ['All'] + sorted(df_all_issues['upload_category'].astype(str).unique().tolist()); sel_cat = st.sidebar.multiselect("Category (from Upload Batch):", cat_opts, default=['All'], key="category_filter")
-am_opts = ['All'] + sorted(df_all_issues['area_manager'].astype(str).unique().tolist()); sel_am = st.sidebar.multiselect("Area Manager:", am_opts, default=['All'], key="area_manager_filter")
-file_type_filter_opts = ['All'] + sorted(df_all_issues['report_type'].astype(str).unique().tolist()); sel_ft = st.sidebar.multiselect("File Type (from Upload Batch):", file_type_filter_opts, default=['All'], key="file_type_filter")
+branch_opts = ['All'] + sorted(df_all_issues['branch'].astype(str).unique().tolist()); sel_branch = st.sidebar.multiselect("Branch:", branch_opts, default=['All'], key="branch_filter_widget")
+cat_opts = ['All'] + sorted(df_all_issues['upload_category'].astype(str).unique().tolist()); sel_cat = st.sidebar.multiselect("Category (from Upload Batch):", cat_opts, default=['All'], key="category_filter_widget")
+am_opts = ['All'] + sorted(df_all_issues['area_manager'].astype(str).unique().tolist()); sel_am = st.sidebar.multiselect("Area Manager:", am_opts, default=['All'], key="area_manager_filter_widget")
+file_type_filter_opts = ['All'] + sorted(df_all_issues['report_type'].astype(str).unique().tolist()); sel_ft = st.sidebar.multiselect("File Type (from Upload Batch):", file_type_filter_opts, default=['All'], key="file_type_filter_widget")
 
 st.sidebar.subheader("📊 Period Comparison")
-enable_comparison = st.sidebar.checkbox("Enable Period Comparison", key="enable_comparison_checkbox")
+enable_comparison = st.sidebar.checkbox("Enable Period Comparison", key="enable_comparison_checkbox_widget")
 comparison_date_range_1, comparison_date_range_2 = None, None 
 if enable_comparison:
     st.sidebar.markdown("**Comparison Period 1 (Issue Dates):**")
     safe_default_p1_end = min_overall_date + timedelta(days=6); safe_default_p1_end = min(safe_default_p1_end, max_overall_date); safe_default_p1_end = max(safe_default_p1_end, min_overall_date)
-    comparison_date_range_1_val = st.sidebar.date_input("Start & End Date (Period 1):", value=[min_overall_date, safe_default_p1_end], min_value=min_overall_date, max_value=max_overall_date, key="comparison_period1_filter")
+    comparison_date_range_1_val = st.sidebar.date_input("Start & End Date (Period 1):", value=[min_overall_date, safe_default_p1_end], min_value=min_overall_date, max_value=max_overall_date, key="comparison_period1_filter_widget")
     if comparison_date_range_1_val and len(comparison_date_range_1_val) == 2:
         comparison_date_range_1 = comparison_date_range_1_val 
         st.sidebar.markdown("**Comparison Period 2 (Issue Dates):**")
         default_p2_start = comparison_date_range_1[1] + timedelta(days=1); default_p2_start = min(default_p2_start, max_overall_date); default_p2_start = max(default_p2_start, min_overall_date)
         default_p2_end = default_p2_start + timedelta(days=6); default_p2_end = min(default_p2_end, max_overall_date); default_p2_end = max(default_p2_end, default_p2_start)
-        comparison_date_range_2_val = st.sidebar.date_input("Start & End Date (Period 2):", value=[default_p2_start, default_p2_end], min_value=min_overall_date, max_value=max_overall_date, key="comparison_period2_filter")
+        comparison_date_range_2_val = st.sidebar.date_input("Start & End Date (Period 2):", value=[default_p2_start, default_p2_end], min_value=min_overall_date, max_value=max_overall_date, key="comparison_period2_filter_widget")
         if comparison_date_range_2_val and len(comparison_date_range_2_val) == 2: comparison_date_range_2 = comparison_date_range_2_val 
         else: comparison_date_range_2 = None 
     else: comparison_date_range_1 = None; comparison_date_range_2 = None 
@@ -359,16 +386,12 @@ def apply_general_filters(df_input, sel_upload_id_val, selected_branches, select
     if 'All' not in selected_file_types: df_filtered = df_filtered[df_filtered['report_type'].isin(selected_file_types)]
     return df_filtered
 df_temp_filtered = apply_general_filters(df_all_issues, sel_id, sel_branch, sel_cat, sel_am, sel_ft)
-df_primary_period = df_temp_filtered.copy() # Initialize before conditional filtering
+df_primary_period = df_temp_filtered.copy()
 if primary_date_range and len(primary_date_range) == 2:
     start_date_filt, end_date_filt = primary_date_range[0], primary_date_range[1]
-    if 'date' in df_primary_period.columns and pd.api.types.is_datetime64_any_dtype(df_primary_period['date']): # Check before .dt
+    if 'date' in df_primary_period.columns and pd.api.types.is_datetime64_any_dtype(df_primary_period['date']):
         df_primary_period = df_primary_period[(df_primary_period['date'].dt.date >= start_date_filt) & (df_primary_period['date'].dt.date <= end_date_filt)]
-    else: # If date column is problematic, result in empty df for this period
-        df_primary_period = pd.DataFrame(columns=df_temp_filtered.columns)
-else: # If primary_date_range is not valid for some reason
-    df_primary_period = pd.DataFrame(columns=df_temp_filtered.columns)
-
+else: df_primary_period = pd.DataFrame(columns=df_temp_filtered.columns)
 st.subheader(f"Filtered Issues for Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}")
 st.write(f"Total issues found in primary period: {len(df_primary_period)}")
 
@@ -416,7 +439,7 @@ else:
     
     if len(df_primary_period) < 50 or (primary_date_range and primary_date_range[0] == primary_date_range[1]):
         st.subheader("Detailed Records (Primary Period - Filtered)")
-        df_display_primary = df_primary_period[['date', 'branch', 'report_type', 'upload_category', 'issues', 'area_manager', 'code']].copy()
+        df_display_primary = df_primary_period[['date', 'branch', 'report_type', 'upload_category', 'issues', 'area_manager', 'code']].copy() # Ensure report_type is from original df_primary_period
         if 'date' in df_display_primary.columns and pd.api.types.is_datetime64_any_dtype(df_display_primary['date']): 
             df_display_primary['date'] = df_display_primary['date'].dt.strftime('%Y-%m-%d') 
         st.dataframe(df_display_primary, use_container_width=True)
@@ -432,26 +455,26 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
     start_c1_disp, end_c1_disp, start_c2_disp, end_c2_disp = "N/A", "N/A", "N/A", "N/A"
 
     if comparison_date_range_1 and len(comparison_date_range_1) == 2:
-        start_c1, end_c1 = comparison_date_range_1[0], comparison_date_range_1[1]
+        start_c1_dt_obj, end_c1_dt_obj = comparison_date_range_1[0], comparison_date_range_1[1] # Use these for filtering
         if 'date' in df_temp_filtered.columns and pd.api.types.is_datetime64_any_dtype(df_temp_filtered['date']): 
-            df_comp1 = df_temp_filtered[(df_temp_filtered['date'].dt.date >= start_c1) & (df_temp_filtered['date'].dt.date <= end_c1)].copy()
-        start_c1_disp, end_c1_disp = start_c1.strftime('%Y-%m-%d'), end_c1.strftime('%Y-%m-%d')
+            df_comp1 = df_temp_filtered[(df_temp_filtered['date'].dt.date >= start_c1_dt_obj) & (df_temp_filtered['date'].dt.date <= end_c1_dt_obj)].copy()
+        start_c1_disp, end_c1_disp = start_c1_dt_obj.strftime('%Y-%m-%d'), end_c1_dt_obj.strftime('%Y-%m-%d')
     
     if comparison_date_range_2 and len(comparison_date_range_2) == 2:
-        start_c2, end_c2 = comparison_date_range_2[0], comparison_date_range_2[1]
+        start_c2_dt_obj, end_c2_dt_obj = comparison_date_range_2[0], comparison_date_range_2[1]
         if 'date' in df_temp_filtered.columns and pd.api.types.is_datetime64_any_dtype(df_temp_filtered['date']): 
-            df_comp2 = df_temp_filtered[(df_temp_filtered['date'].dt.date >= start_c2) & (df_temp_filtered['date'].dt.date <= end_c2)].copy()
-        start_c2_disp, end_c2_disp = start_c2.strftime('%Y-%m-%d'), end_c2.strftime('%Y-%m-%d')
+            df_comp2 = df_temp_filtered[(df_temp_filtered['date'].dt.date >= start_c2_dt_obj) & (df_temp_filtered['date'].dt.date <= end_c2_dt_obj)].copy()
+        start_c2_disp, end_c2_disp = start_c2_dt_obj.strftime('%Y-%m-%d'), end_c2_dt_obj.strftime('%Y-%m-%d')
 
     if not df_comp1.empty or not df_comp2.empty:
         if comparison_date_range_1: st.subheader(f"Period 1: {start_c1_disp} to {end_c1_disp} (Total: {len(df_comp1)} issues)")
         if comparison_date_range_2: st.subheader(f"Period 2: {start_c2_disp} to {end_c2_disp} (Total: {len(df_comp2)} issues)")
         
-        col_comp1_disp, col_comp2_disp = st.columns(2)
-        with col_comp1_disp:
+        col_comp1_disp_metrics, col_comp2_disp_metrics = st.columns(2) # Renamed for clarity
+        with col_comp1_disp_metrics:
             st.metric(label=f"Total Issues (P1)", value=len(df_comp1))
             if not df_comp1.empty: st.dataframe(df_comp1['issues'].value_counts().nlargest(5).reset_index().rename(columns={'index':'Issue', 'issues':'Count'}), height=220, use_container_width=True)
-        with col_comp2_disp:
+        with col_comp2_disp_metrics:
             delta_val = len(df_comp2) - len(df_comp1); st.metric(label=f"Total Issues (P2)", value=len(df_comp2), delta=f"{delta_val:+}" if delta_val !=0 else None)
             if not df_comp2.empty: st.dataframe(df_comp2['issues'].value_counts().nlargest(5).reset_index().rename(columns={'index':'Issue', 'issues':'Count'}), height=220, use_container_width=True)
         
@@ -488,8 +511,8 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
 st.sidebar.subheader("Downloads")
 if 'df_primary_period' in locals() and not df_primary_period.empty:
     csv_data_primary = df_primary_period.to_csv(index=False).encode('utf-8')
-    st.sidebar.download_button("Download Primary Period Data as CSV", csv_data_primary, "primary_period_issues.csv", "text/csv", key="download_csv_primary")
-    if st.sidebar.button("Prepare Visuals PDF (Primary Period)", key="prep_visuals_pdf_primary"):
+    st.sidebar.download_button("Download Primary Period Data as CSV", csv_data_primary, "primary_period_issues.csv", "text/csv", key="download_csv_primary_widget")
+    if st.sidebar.button("Prepare Visuals PDF (Primary Period)", key="prep_visuals_pdf_primary_widget"):
         if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set.")
         elif 'figs_primary' not in locals() or not figs_primary or not any(figs_primary.values()): st.sidebar.warning("No visuals for primary period.")
         else:
@@ -498,17 +521,15 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
             for title in chart_titles_in_order:
                 if figs_primary.get(title): 
                     fig_obj = figs_primary[title]; 
-                    try: # Added try-except for image conversion
-                        img_bytes = fig_obj.to_image(format='png', engine='kaleido', scale=2); b64_img = base64.b64encode(img_bytes).decode()
-                        html_content += f"<h2>{title}</h2><img src='data:image/png;base64,{b64_img}' alt='{title}'/>"
-                    except Exception as e_fig: st.sidebar.warning(f"Fig '{title}' to image error: {e_fig}. Kaleido may be needed.")
+                    try: img_bytes = fig_obj.to_image(format='png', engine='kaleido', scale=2); b64_img = base64.b64encode(img_bytes).decode(); html_content += f"<h2>{title}</h2><img src='data:image/png;base64,{b64_img}' alt='{title}'/>"
+                    except Exception as e_fig: st.sidebar.warning(f"Fig '{title}' to image error: {e_fig}.")
             html_content += "</body></html>"; pdf_bytes = generate_pdf(html_content, fname='visuals_report_primary.pdf', wk_path=wk_path)
             if pdf_bytes: st.session_state.pdf_visuals_primary_data = pdf_bytes; st.sidebar.success("Visuals PDF (Primary) ready.")
             else:
                 if 'pdf_visuals_primary_data' in st.session_state: del st.session_state.pdf_visuals_primary_data
     if 'pdf_visuals_primary_data' in st.session_state and st.session_state.pdf_visuals_primary_data:
-        st.sidebar.download_button(label="Download Visuals PDF (Primary) Now", data=st.session_state.pdf_visuals_primary_data, file_name="visuals_report_primary.pdf", mime="application/pdf", key="action_dl_visuals_pdf_primary")
-    if st.sidebar.button("Prepare Full Dashboard PDF (Primary Period)", key="prep_dashboard_pdf_primary"):
+        st.sidebar.download_button(label="Download Visuals PDF (Primary) Now", data=st.session_state.pdf_visuals_primary_data, file_name="visuals_report_primary.pdf", mime="application/pdf", key="action_dl_visuals_pdf_primary_widget")
+    if st.sidebar.button("Prepare Full Dashboard PDF (Primary Period)", key="prep_dashboard_pdf_primary_widget"):
         if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set.")
         else:
             html_full = "<head><meta charset='utf-8'><style>body{font-family:sans-serif;} table{border-collapse:collapse;width:100%;} th,td{border:1px solid #ddd;padding:8px;text-align:left;} th{background-color:#f2f2f2;}</style></head>"
@@ -521,15 +542,19 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
             else:
                 if 'pdf_dashboard_primary_data' in st.session_state: del st.session_state.pdf_dashboard_primary_data
     if 'pdf_dashboard_primary_data' in st.session_state and st.session_state.pdf_dashboard_primary_data:
-        st.sidebar.download_button(label="Download Dashboard PDF (Primary) Now", data=st.session_state.pdf_dashboard_primary_data, file_name="dashboard_report_primary.pdf", mime="application/pdf", key="action_dl_dashboard_pdf_primary")
+        st.sidebar.download_button(label="Download Dashboard PDF (Primary) Now", data=st.session_state.pdf_dashboard_primary_data, file_name="dashboard_report_primary.pdf", mime="application/pdf", key="action_dl_dashboard_pdf_primary_widget")
 else: st.sidebar.info("No primary period data to download.")
 
 if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
     df_comp1_exists = 'df_comp1' in locals() and not df_comp1.empty; df_comp2_exists = 'df_comp2' in locals() and not df_comp2.empty
-    start_c1_str = comparison_date_range_1[0].strftime('%Y%m%d') if df_comp1_exists and comparison_date_range_1 else "P1"; end_c1_str = comparison_date_range_1[1].strftime('%Y%m%d') if df_comp1_exists and comparison_date_range_1 else ""
-    start_c2_str = comparison_date_range_2[0].strftime('%Y%m%d') if df_comp2_exists and comparison_date_range_2 else "P2"; end_c2_str = comparison_date_range_2[1].strftime('%Y%m%d') if df_comp2_exists and comparison_date_range_2 else ""
-    if df_comp1_exists: st.sidebar.download_button(f"CSV (Comp P1: {comparison_date_range_1[0]:%b%d}-{comparison_date_range_1[1]:%b%d})", df_comp1.to_csv(index=False).encode('utf-8'), f"comp_p1_{start_c1_str}-{end_c1_str}.csv", "text/csv", key="dl_csv_comp1")
-    if df_comp2_exists: st.sidebar.download_button(f"CSV (Comp P2: {comparison_date_range_2[0]:%b%d}-{comparison_date_range_2[1]:%b%d})", df_comp2.to_csv(index=False).encode('utf-8'), f"comp_p2_{start_c2_str}-{end_c2_str}.csv", "text/csv", key="dl_csv_comp2")
+    # Ensure comparison_date_range_1 and _2 are valid before strftime
+    start_c1_str = comparison_date_range_1[0].strftime('%Y%m%d') if df_comp1_exists and comparison_date_range_1 and len(comparison_date_range_1)==2 else "P1"
+    end_c1_str = comparison_date_range_1[1].strftime('%Y%m%d') if df_comp1_exists and comparison_date_range_1 and len(comparison_date_range_1)==2 else ""
+    start_c2_str = comparison_date_range_2[0].strftime('%Y%m%d') if df_comp2_exists and comparison_date_range_2 and len(comparison_date_range_2)==2 else "P2"
+    end_c2_str = comparison_date_range_2[1].strftime('%Y%m%d') if df_comp2_exists and comparison_date_range_2 and len(comparison_date_range_2)==2 else ""
+    
+    if df_comp1_exists: st.sidebar.download_button(f"CSV (Comp P1: {comparison_date_range_1[0]:%b%d}-{comparison_date_range_1[1]:%b%d})", df_comp1.to_csv(index=False).encode('utf-8'), f"comp_p1_{start_c1_str}-{end_c1_str}.csv", "text/csv", key="dl_csv_comp1_widget")
+    if df_comp2_exists: st.sidebar.download_button(f"CSV (Comp P2: {comparison_date_range_2[0]:%b%d}-{comparison_date_range_2[1]:%b%d})", df_comp2.to_csv(index=False).encode('utf-8'), f"comp_p2_{start_c2_str}-{end_c2_str}.csv", "text/csv", key="dl_csv_comp2_widget")
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Database: {DB_PATH} (Local SQLite)")
