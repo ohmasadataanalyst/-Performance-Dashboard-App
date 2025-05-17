@@ -201,7 +201,7 @@ if is_admin:
         elif imp_from_dt > imp_to_dt:
             st.sidebar.error("Import From Date cannot be after Import To Date.")
         else:
-            if not requires_file_type: final_file_type = None 
+            if not requires_file_type: final_file_type = None
             data = up.getvalue()
             ts = datetime.now().isoformat()
             upload_submission_date_str = imp_from_dt.isoformat()
@@ -213,32 +213,64 @@ if is_admin:
                     st.sidebar.warning(f"Upload batch for '{up.name}' (Category: {final_category}, File Type: {final_file_type or 'N/A'}, Import From: {upload_submission_date_str}) seems duplicate.")
                 else:
                     df_excel_full = pd.read_excel(io.BytesIO(data))
-                    df_excel_full.columns = [col.strip().lower().replace('\n', ' ').replace('\r', '') for col in df_excel_full.columns]
+                    # Normalize all column names from the Excel file
+                    df_excel_full.columns = [str(col).strip().lower().replace('\n', ' ').replace('\r', '') for col in df_excel_full.columns]
+
+                    # Define OUR standardized (lowercase) expected column names from Excel
+                    # Universal
+                    EXCEL_CODE_COL = 'code'
+
+                    # Standard
+                    STD_EXCEL_ISSUES_COL = 'issues'
+                    STD_EXCEL_BRANCH_COL = 'branch' # Can contain code or name, used for name fallback
+                    STD_EXCEL_AM_COL = 'area manager'
+                    STD_EXCEL_DATE_COL = 'date'
+
+                    # CCTV
+                    CCTV_EXCEL_VIOLATION_COL = 'choose the violation - اختر المخالفه'
+                    CCTV_EXCEL_SHIFT_COL = 'choose the shift - اختر الشفت'
+                    CCTV_EXCEL_DATE_COL = 'date submitted'
+                    CCTV_EXCEL_BRANCH_COL = 'branch' # Can contain code or name, used for name fallback
+                    CCTV_EXCEL_AM_COL = 'area manager'
+
+                    # Complaints Performance
+                    COMP_PERF_EXCEL_BRANCH_NAME_COL = 'اختر الفرع' # Specific name column for complaints
+                    COMP_PERF_EXCEL_TYPE_COL = 'نوع الشكوى'
+                    COMP_PERF_EXCEL_PRODUCT_COL = 'الشكوى على اي منتج؟'
+                    COMP_PERF_EXCEL_QUALITY_COL = 'فى حاله كانت الشكوى جوده برجاء تحديد نوع الشكوى'
+                    COMP_PERF_EXCEL_ORDER_ERROR_COL = 'فى حاله خطاء فى الطلب برجاء تحديد نوع الشكوى'
+                    COMP_PERF_EXCEL_DATE_COL = 'date submitted'
+
 
                     missing_cols_detected = []
                     date_column_in_excel = ''
-                    branch_column_excel = 'branch' # Standard name of branch column in Excel
-
-                    if final_category == 'CCTV':
-                        required_cols_cctv = ['code', 'choose the violation - اختر المخالفه', 'choose the shift - اختر الشفت', 'date submitted', branch_column_excel, 'area manager']
-                        missing_cols_detected = [col for col in required_cols_cctv if col not in df_excel_full.columns]
-                        date_column_in_excel = 'date submitted'
-                    else: 
-                        required_cols_std = ['code', 'issues', branch_column_excel, 'area manager', 'date']
-                        missing_cols_detected = [col for col in required_cols_std if col not in df_excel_full.columns]
-                        date_column_in_excel = 'date'
                     
-                    # Always check for 'code' and the branch column name as they are crucial
-                    if 'code' not in df_excel_full.columns:
-                        if 'code' not in missing_cols_detected: missing_cols_detected.append('code')
-                    if branch_column_excel not in df_excel_full.columns:
-                         if branch_column_excel not in missing_cols_detected: missing_cols_detected.append(branch_column_excel)
+                    if final_category == 'CCTV':
+                        required_cols_cctv = [EXCEL_CODE_COL, CCTV_EXCEL_VIOLATION_COL, CCTV_EXCEL_SHIFT_COL, CCTV_EXCEL_DATE_COL, CCTV_EXCEL_BRANCH_COL, CCTV_EXCEL_AM_COL]
+                        missing_cols_detected = [col for col in required_cols_cctv if col not in df_excel_full.columns]
+                        date_column_in_excel = CCTV_EXCEL_DATE_COL
+                    elif final_category == 'complaints' and final_file_type == 'performance':
+                        required_cols_complaints_perf = [
+                            EXCEL_CODE_COL, COMP_PERF_EXCEL_BRANCH_NAME_COL,
+                            COMP_PERF_EXCEL_TYPE_COL, COMP_PERF_EXCEL_PRODUCT_COL,
+                            COMP_PERF_EXCEL_QUALITY_COL, COMP_PERF_EXCEL_ORDER_ERROR_COL,
+                            COMP_PERF_EXCEL_DATE_COL
+                        ]
+                        missing_cols_detected = [col for col in required_cols_complaints_perf if col not in df_excel_full.columns]
+                        date_column_in_excel = COMP_PERF_EXCEL_DATE_COL
+                    else: # Standard uploads (operation-training, missing, meal training, visits etc.)
+                        required_cols_std = [EXCEL_CODE_COL, STD_EXCEL_ISSUES_COL, STD_EXCEL_BRANCH_COL, STD_EXCEL_AM_COL, STD_EXCEL_DATE_COL]
+                        missing_cols_detected = [col for col in required_cols_std if col not in df_excel_full.columns]
+                        date_column_in_excel = STD_EXCEL_DATE_COL
+                    
+                    if EXCEL_CODE_COL not in df_excel_full.columns and EXCEL_CODE_COL not in missing_cols_detected: # Ensure 'code' is checked if not already
+                         missing_cols_detected.append(EXCEL_CODE_COL)
 
 
                     if missing_cols_detected:
-                        st.sidebar.error(f"Excel for '{final_category}' is missing columns: {', '.join(list(set(missing_cols_detected)))}. Aborted.")
+                        st.sidebar.error(f"Excel for '{final_category}' / '{final_file_type}' is missing columns: {', '.join(list(set(missing_cols_detected)))}. Aborted.")
                     else:
-                        df_excel_full['parsed_date'] = pd.to_datetime(df_excel_full[date_column_in_excel], dayfirst=True, errors='coerce')
+                        df_excel_full['parsed_date'] = pd.to_datetime(df_excel_full[date_column_in_excel], errors='coerce') # dayfirst=True removed for more general parsing
                         original_excel_rows = len(df_excel_full)
                         df_excel_full.dropna(subset=['parsed_date'], inplace=True)
 
@@ -257,33 +289,63 @@ if is_admin:
                                 c.execute('INSERT INTO uploads (filename, uploader, timestamp, file_type, category, submission_date, file) VALUES (?, ?, ?, ?, ?, ?, ?)',
                                           (up.name, current_user, ts, final_file_type, final_category, upload_submission_date_str, sqlite3.Binary(data)))
                                 upload_id = c.lastrowid
-                                unmapped_branch_codes = set() # For branch standardization
+                                unmapped_branch_codes = set()
 
                                 for _, row in df_to_import.iterrows():
                                     issue_date_str = row['parsed_date'].strftime('%Y-%m-%d')
-                                    code_val_from_excel = str(row['code']) if pd.notna(row['code']) else ""
+                                    code_val_from_excel = str(row[EXCEL_CODE_COL]) if pd.notna(row[EXCEL_CODE_COL]) else ""
                                     
-                                    # --- BRANCH STANDARDIZATION ---
+                                    # Determine the source for the original branch name (for fallback if code not in schema)
+                                    # And other category-specific fields
+                                    issue_val = ""
+                                    am_val = ""
+                                    shift_val = None # Default to None
+                                    actual_branch_name_in_excel_for_fallback = "Unknown Branch"
+
+                                    if final_category == 'complaints' and final_file_type == 'performance':
+                                        actual_branch_name_in_excel_for_fallback = str(row[COMP_PERF_EXCEL_BRANCH_NAME_COL]) if pd.notna(row[COMP_PERF_EXCEL_BRANCH_NAME_COL]) else "Unknown Branch (Complaints)"
+                                        am_val = "N/A - Complaints"
+
+                                        details = []
+                                        complaint_type_val = row.get(COMP_PERF_EXCEL_TYPE_COL)
+                                        product_val = row.get(COMP_PERF_EXCEL_PRODUCT_COL)
+                                        quality_val = row.get(COMP_PERF_EXCEL_QUALITY_COL)
+                                        order_error_val = row.get(COMP_PERF_EXCEL_ORDER_ERROR_COL)
+
+                                        if pd.notna(complaint_type_val) and str(complaint_type_val).strip(): details.append(f"Type: {str(complaint_type_val).strip()}")
+                                        
+                                        product_str = str(product_val).strip()
+                                        if pd.notna(product_val) and product_str and product_str.lower() != "لا علاقة لها بالمنتج": # Specific check for "لا علاقة لها بالمنتج"
+                                            details.append(f"Product: {product_str}")
+                                        
+                                        if pd.notna(quality_val) and str(quality_val).strip(): details.append(f"Quality Detail: {str(quality_val).strip()}")
+                                        if pd.notna(order_error_val) and str(order_error_val).strip(): details.append(f"Order Error: {str(order_error_val).strip()}")
+                                        
+                                        issue_val = "; ".join(details) if details else "No specific complaint details provided"
+                                        # shift_val remains None
+
+                                    elif final_category == 'CCTV':
+                                        actual_branch_name_in_excel_for_fallback = str(row[CCTV_EXCEL_BRANCH_COL]) if pd.notna(row[CCTV_EXCEL_BRANCH_COL]) else "Unknown Branch (CCTV)"
+                                        am_val = str(row[CCTV_EXCEL_AM_COL]) if pd.notna(row[CCTV_EXCEL_AM_COL]) else "N/A"
+                                        issue_val = str(row[CCTV_EXCEL_VIOLATION_COL]) if pd.notna(row[CCTV_EXCEL_VIOLATION_COL]) else "N/A"
+                                        shift_val = str(row[CCTV_EXCEL_SHIFT_COL]) if pd.notna(row[CCTV_EXCEL_SHIFT_COL]) else None
+                                    
+                                    else: # Standard
+                                        actual_branch_name_in_excel_for_fallback = str(row[STD_EXCEL_BRANCH_COL]) if pd.notna(row[STD_EXCEL_BRANCH_COL]) else "Unknown Branch (Standard)"
+                                        am_val = str(row[STD_EXCEL_AM_COL]) if pd.notna(row[STD_EXCEL_AM_COL]) else "N/A"
+                                        issue_val = str(row[STD_EXCEL_ISSUES_COL]) if pd.notna(row[STD_EXCEL_ISSUES_COL]) else "N/A"
+                                        # shift_val remains None
+
+                                    # --- BRANCH STANDARDIZATION (COMMON) ---
                                     normalized_code_for_lookup = code_val_from_excel.strip().upper()
-                                    original_branch_from_excel = str(row[branch_column_excel]) if pd.notna(row[branch_column_excel]) else "Unknown Branch"
-                                    standardized_branch_name = BRANCH_SCHEMA_NORMALIZED.get(normalized_code_for_lookup, original_branch_from_excel)
+                                    standardized_branch_name = BRANCH_SCHEMA_NORMALIZED.get(normalized_code_for_lookup, actual_branch_name_in_excel_for_fallback)
                                     if normalized_code_for_lookup not in BRANCH_SCHEMA_NORMALIZED and normalized_code_for_lookup:
-                                        unmapped_branch_codes.add(f"{code_val_from_excel} (used: {original_branch_from_excel})")
+                                        unmapped_branch_codes.add(f"{code_val_from_excel} (using name: {actual_branch_name_in_excel_for_fallback})")
                                     # --- END BRANCH STANDARDIZATION ---
                                     
-                                    am_val = row['area manager']
-
-                                    if final_category == 'CCTV':
-                                        issue_val = row['choose the violation - اختر المخالفه'] 
-                                        shift_val = row['choose the shift - اختر الشفت']
-                                        c.execute('''INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type, shift)
-                                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                                                  (upload_id, code_val_from_excel, issue_val, standardized_branch_name, am_val, issue_date_str, final_file_type, shift_val))
-                                    else: 
-                                        issue_val = row['issues']
-                                        c.execute('''INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type, shift)
-                                                     VALUES (?, ?, ?, ?, ?, ?, ?, NULL)''',
-                                                  (upload_id, code_val_from_excel, issue_val, standardized_branch_name, am_val, issue_date_str, final_file_type))
+                                    c.execute('''INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type, shift)
+                                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                                              (upload_id, code_val_from_excel, issue_val, standardized_branch_name, am_val, issue_date_str, final_file_type, shift_val))
                                 
                                 if unmapped_branch_codes:
                                     st.sidebar.warning(f"Unmapped branch codes encountered (original Excel branch name was used). Consider updating BRANCH_SCHEMA: {', '.join(sorted(list(unmapped_branch_codes)))}")
@@ -294,7 +356,7 @@ if is_admin:
             except sqlite3.Error as e_sql:
                 conn.rollback(); st.sidebar.error(f"DB error: {e_sql}. Rolled back.")
             except KeyError as e_key:
-                conn.rollback(); st.sidebar.error(f"Column error: Missing column {e_key} in Excel for '{final_category}'. Check headers. Rolled back.")
+                conn.rollback(); st.sidebar.error(f"Column error: Missing column {e_key} in Excel for '{final_category}/{final_file_type}'. Check headers and requirements. Rolled back.")
             except Exception as e_general:
                 conn.rollback(); st.sidebar.error(f"Error processing '{up.name}': {e_general}. Rolled back.")
 
@@ -406,17 +468,33 @@ st.write(f"Total issues found in primary period: {len(df_primary_period)}")
 
 def create_bar_chart(df_source, group_col, title_suffix=""):
     title = f"Issues by {group_col.replace('_',' ').title()} {title_suffix}"
-    if group_col in df_source.columns and not df_source[group_col].isnull().all():
-        data = df_source.astype({group_col: str}).groupby(group_col).size().reset_index(name='count').sort_values('count', ascending=False)
+    if group_col not in df_source.columns: return None
+
+    # Filter out rows where the group_col is NaN or an empty/whitespace string
+    df_valid_data = df_source.copy()
+    df_valid_data.dropna(subset=[group_col], inplace=True)
+    df_valid_data[group_col] = df_valid_data[group_col].astype(str).str.strip()
+    df_valid_data = df_valid_data[df_valid_data[group_col] != '']
+    
+    if not df_valid_data.empty:
+        data = df_valid_data.groupby(group_col).size().reset_index(name='count').sort_values('count', ascending=False)
         if not data.empty: return px.bar(data, x=group_col, y='count', title=title, template="plotly_white")
     return None
 
 def create_pie_chart(df_source, group_col, title_suffix=""):
     title = f"Issues by {group_col.replace('_',' ').title()} {title_suffix}"
-    if group_col in df_source.columns and not df_source[group_col].isnull().all():
-        data = df_source.astype({group_col: str}).groupby(group_col).size().reset_index(name='count')
+    if group_col not in df_source.columns: return None
+
+    df_valid_data = df_source.copy()
+    df_valid_data.dropna(subset=[group_col], inplace=True)
+    df_valid_data[group_col] = df_valid_data[group_col].astype(str).str.strip()
+    df_valid_data = df_valid_data[df_valid_data[group_col] != '']
+
+    if not df_valid_data.empty:
+        data = df_valid_data.groupby(group_col).size().reset_index(name='count')
         if not data.empty: return px.pie(data, names=group_col, values='count', title=title, hole=0.3, template="plotly_white")
     return None
+
 
 figs_primary = {} # Initialize to store figures for PDF
 
@@ -441,10 +519,13 @@ else:
         if figs_primary['Category']: st.plotly_chart(figs_primary['Category'], use_container_width=True)
 
     if 'shift' in df_primary_period.columns and df_primary_period['shift'].notna().any():
-        with st.container():
-            figs_primary['Shift_Values'] = create_bar_chart(df_primary_period[df_primary_period['shift'].notna()], 'shift', '(Primary - CCTV Shift Times)')
-            if figs_primary['Shift_Values']:
-                st.plotly_chart(figs_primary['Shift_Values'], use_container_width=True)
+        df_shift_data = df_primary_period[df_primary_period['shift'].notna() & (df_primary_period['shift'].astype(str).str.strip() != '')]
+        if not df_shift_data.empty:
+            with st.container(): # Use a container to ensure it appears below previous charts
+                figs_primary['Shift_Values'] = create_bar_chart(df_shift_data, 'shift', '(Primary - CCTV Shift Times)')
+                if figs_primary['Shift_Values']:
+                    st.plotly_chart(figs_primary['Shift_Values'], use_container_width=True)
+
 
     if 'date' in df_primary_period.columns and pd.api.types.is_datetime64_any_dtype(df_primary_period['date']) and not df_primary_period['date'].isnull().all():
         trend_data_primary = df_primary_period.groupby(df_primary_period['date'].dt.date).size().reset_index(name='daily_issues')
@@ -472,11 +553,23 @@ else:
         st.dataframe(df_display_primary.reset_index(drop=True), use_container_width=True)
 
     st.subheader("Top Issues (Primary Period - Filtered)")
-    if 'issues' in df_primary_period.columns and not df_primary_period['issues'].isnull().all():
-        top_issues_primary = df_primary_period['issues'].astype(str).value_counts().head(20).rename_axis('Issue/Violation Description').reset_index(name='Frequency')
-        if not top_issues_primary.empty: st.dataframe(top_issues_primary, use_container_width=True)
+    if 'issues' in df_primary_period.columns and df_primary_period['issues'].notna().any():
+        df_issues_for_top = df_primary_period[['issues']].copy() # Avoid SettingWithCopyWarning
+        df_issues_for_top.dropna(subset=['issues'], inplace=True)
+        df_issues_for_top['issues_str'] = df_issues_for_top['issues'].astype(str).str.strip()
+        df_issues_for_top = df_issues_for_top[df_issues_for_top['issues_str'] != ''] # Filter out empty strings
 
-# --- Comparison Period Logic (from your previous code, with minor adjustments) ---
+        if not df_issues_for_top.empty:
+            top_issues_primary = df_issues_for_top['issues_str'].value_counts().head(20).rename_axis('Issue/Violation Description').reset_index(name='Frequency')
+            if not top_issues_primary.empty: 
+                st.dataframe(top_issues_primary, use_container_width=True)
+            else:
+                st.info("No non-empty issue descriptions found for 'Top Issues' (Primary Period).")
+        else:
+            st.info("No non-empty issue descriptions found for 'Top Issues' (Primary Period).")
+
+
+# --- Comparison Period Logic ---
 df_comp1, df_comp2 = pd.DataFrame(), pd.DataFrame() # Initialize for safety
 
 if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
@@ -503,15 +596,28 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
         st.subheader("Top 5 Issues Comparison")
         col_comp1_disp, col_comp2_disp = st.columns(2)
         with col_comp1_disp:
-            if not df_comp1.empty: 
-                st.markdown(f"**{p1_label}**")
-                st.dataframe(df_comp1['issues'].astype(str).value_counts().nlargest(5).reset_index().rename(columns={'index':'Issue/Violation', 'count':'Count'}), height=220, use_container_width=True)
+            if not df_comp1.empty and 'issues' in df_comp1.columns:
+                df_issues_comp1 = df_comp1[['issues']].copy()
+                df_issues_comp1.dropna(subset=['issues'], inplace=True)
+                df_issues_comp1['issues_str'] = df_issues_comp1['issues'].astype(str).str.strip()
+                df_issues_comp1 = df_issues_comp1[df_issues_comp1['issues_str'] != '']
+                if not df_issues_comp1.empty:
+                    st.markdown(f"**{p1_label}**")
+                    st.dataframe(df_issues_comp1['issues_str'].value_counts().nlargest(5).reset_index().rename(columns={'index':'Issue/Violation', 'count':'Count'}), height=220, use_container_width=True)
+                else: st.info(f"No non-empty issues for {p1_label}")
             else: st.info(f"No data for {p1_label}")
         with col_comp2_disp:
-            if not df_comp2.empty:
-                st.markdown(f"**{p2_label}**")
-                st.dataframe(df_comp2['issues'].astype(str).value_counts().nlargest(5).reset_index().rename(columns={'index':'Issue/Violation', 'count':'Count'}), height=220, use_container_width=True)
+            if not df_comp2.empty and 'issues' in df_comp2.columns:
+                df_issues_comp2 = df_comp2[['issues']].copy()
+                df_issues_comp2.dropna(subset=['issues'], inplace=True)
+                df_issues_comp2['issues_str'] = df_issues_comp2['issues'].astype(str).str.strip()
+                df_issues_comp2 = df_issues_comp2[df_issues_comp2['issues_str'] != '']
+                if not df_issues_comp2.empty:
+                    st.markdown(f"**{p2_label}**")
+                    st.dataframe(df_issues_comp2['issues_str'].value_counts().nlargest(5).reset_index().rename(columns={'index':'Issue/Violation', 'count':'Count'}), height=220, use_container_width=True)
+                else: st.info(f"No non-empty issues for {p2_label}")
             else: st.info(f"No data for {p2_label}")
+
 
         df_comp1_labeled = df_comp1.copy(); df_comp2_labeled = df_comp2.copy()
         df_comp1_labeled['period_label'] = p1_label
@@ -524,10 +630,17 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
         if dfs_to_concat:
             df_combined_branch = pd.concat(dfs_to_concat)
             if not df_combined_branch.empty:
-                branch_comp_data = df_combined_branch.groupby(['branch', 'period_label']).size().reset_index(name='count')
-                if not branch_comp_data.empty:
-                    fig_branch_comp = px.bar(branch_comp_data, x='branch', y='count', color='period_label', barmode='group', title='Issues by Branch (Comparison)')
-                    st.plotly_chart(fig_branch_comp, use_container_width=True)
+                # Apply same filtering as create_bar_chart for branch comparison
+                df_valid_branch_comp = df_combined_branch.copy()
+                df_valid_branch_comp.dropna(subset=['branch'], inplace=True)
+                df_valid_branch_comp['branch'] = df_valid_branch_comp['branch'].astype(str).str.strip()
+                df_valid_branch_comp = df_valid_branch_comp[df_valid_branch_comp['branch'] != '']
+
+                if not df_valid_branch_comp.empty:
+                    branch_comp_data = df_valid_branch_comp.groupby(['branch', 'period_label']).size().reset_index(name='count')
+                    if not branch_comp_data.empty:
+                        fig_branch_comp = px.bar(branch_comp_data, x='branch', y='count', color='period_label', barmode='group', title='Issues by Branch (Comparison)')
+                        st.plotly_chart(fig_branch_comp, use_container_width=True)
             
             st.markdown("#### Period-Level Trend (Average Daily Issues)")
             period_summary_data = []
@@ -553,19 +666,16 @@ else:
         st.warning("Comparison periods not properly set. Please check the date ranges.")
 
 
-# --- Downloads Section (Integrates your structure with enhanced PDF generation) ---
+# --- Downloads Section ---
 st.sidebar.subheader("Downloads")
 
-# --- Primary Period Downloads ---
 if 'df_primary_period' in locals() and not df_primary_period.empty:
     st.sidebar.markdown("**Primary Period Data:**")
-    # CSV Download
     try:
         csv_data_primary = df_primary_period.to_csv(index=False).encode('utf-8')
         st.sidebar.download_button("Download Primary (CSV)", csv_data_primary, f"primary_issues_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.csv", "text/csv", key="download_csv_primary")
     except Exception as e: st.sidebar.error(f"Primary CSV Error: {e}")
 
-    # Excel Download
     try:
         output_excel = io.BytesIO()
         with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
@@ -577,7 +687,6 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
     except Exception as e: st.sidebar.error(f"Primary Excel Error: {e}")
 
 
-    # Visuals PDF
     if st.sidebar.button("Prepare Visuals PDF (Primary)", key="prep_visuals_pdf_primary"):
         if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set for PDF generation.")
         elif 'figs_primary' not in locals() or not figs_primary or not any(figs_primary.values()): st.sidebar.warning("No visuals generated for the primary period.")
@@ -595,7 +704,6 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                     if figs_primary.get(title_key):
                         fig_obj = figs_primary[title_key]
                         try:
-                            # Ensure kaleido is installed: pip install kaleido
                             img_bytes = fig_obj.to_image(format='png', engine='kaleido', scale=1.2, width=700, height=450)
                             b64_img = base64.b64encode(img_bytes).decode()
                             
@@ -605,16 +713,15 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                             elif title_key == "Shift_Values": actual_chart_title = "Issues by Shift Times (Primary)"
                             elif title_key == "Report Type": actual_chart_title = "Issues by Report Type (Primary)"
 
-
                             html_content += f"<h2>{actual_chart_title}</h2><img src='data:image/png;base64,{b64_img}' alt='{actual_chart_title}'/>"
                         except Exception as e_img:
                             st.sidebar.error(f"Error generating image for '{title_key}': {e_img}")
                 html_content += "</body></html>"
-                pdf_bytes_visuals = generate_pdf(html_content, wk_path=wk_path) # fname not needed
+                pdf_bytes_visuals = generate_pdf(html_content, wk_path=wk_path) 
                 if pdf_bytes_visuals:
                     st.session_state.pdf_visuals_primary_data = pdf_bytes_visuals
                     st.sidebar.success("Visuals PDF (Primary) ready for download.")
-                else: # Error already shown by generate_pdf
+                else: 
                     if 'pdf_visuals_primary_data' in st.session_state: del st.session_state.pdf_visuals_primary_data
     
     if 'pdf_visuals_primary_data' in st.session_state and st.session_state.pdf_visuals_primary_data:
@@ -622,7 +729,6 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                                    file_name=f"visuals_report_primary_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.pdf", 
                                    mime="application/pdf", key="action_dl_visuals_pdf_primary")
 
-    # Full Dashboard PDF (Data Table)
     if st.sidebar.button("Prepare Data Table PDF (Primary)", key="prep_dashboard_pdf_primary"):
         if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set for PDF generation.")
         else:
@@ -641,10 +747,10 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                     df_pdf_view.loc[condition_pdf_table, 'report_type'] = 'CCTV issues'
                 if pd.api.types.is_datetime64_any_dtype(df_pdf_view['date']): df_pdf_view['date'] = df_pdf_view['date'].dt.strftime('%Y-%m-%d')
                 
-                html_full += df_pdf_view.to_html(index=False, classes="dataframe", border=1) # Ensure border for table
+                html_full += df_pdf_view.to_html(index=False, classes="dataframe", border=1) 
                 html_full += "</body></html>"
 
-                pdf_full_bytes = generate_pdf(html_full, wk_path=wk_path) # fname not needed
+                pdf_full_bytes = generate_pdf(html_full, wk_path=wk_path) 
                 if pdf_full_bytes: 
                     st.session_state.pdf_dashboard_primary_data = pdf_full_bytes
                     st.sidebar.success("Data Table PDF (Primary) ready.")
@@ -659,10 +765,8 @@ else:
     st.sidebar.info("No primary period data to download.")
 
 
-# --- Comparison Period CSV Downloads ---
 if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
     st.sidebar.markdown("**Comparison Period Data (CSV):**")
-    # df_comp1 and df_comp2 are defined in the comparison display logic
     df_comp1_exists = 'df_comp1' in locals() and not df_comp1.empty
     df_comp2_exists = 'df_comp2' in locals() and not df_comp2.empty
     
