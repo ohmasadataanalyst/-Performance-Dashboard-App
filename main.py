@@ -200,21 +200,19 @@ if is_admin:
         imp_to_dt = st.session_state.import_to_date_upload
         requires_file_type = bool(category_file_types.get(final_category, []))
 
-        # --- Initial Parameter Validations ---
         if requires_file_type and not final_file_type:
             st.sidebar.error(f"A file type is required for category '{final_category}'. Please select one and click 'Upload Data' again.")
-            st.stop() # Halt execution
+            st.stop()
         if not up:
             st.sidebar.error("Please select an Excel file to upload.")
-            st.stop() # Halt execution
+            st.stop()
         if not imp_from_dt or not imp_to_dt:
             st.sidebar.error("Please select both 'Import Data From Date' and 'Import Data To Date'.")
-            st.stop() # Halt execution
+            st.stop()
         if imp_from_dt > imp_to_dt:
             st.sidebar.error("'Import Data From Date' cannot be after 'Import Data To Date'.")
-            st.stop() # Halt execution
+            st.stop()
 
-        # If execution reaches here, initial validations are passed.
         if not requires_file_type:
             final_file_type = None
 
@@ -223,36 +221,41 @@ if is_admin:
         upload_submission_date_str = imp_from_dt.isoformat()
 
         try:
-            # --- Check for Duplicate Upload Batch ---
             c.execute('SELECT COUNT(*) FROM uploads WHERE filename=? AND uploader=? AND file_type IS ? AND category=? AND submission_date=?',
                       (up.name, current_user, final_file_type, final_category, upload_submission_date_str))
             if c.fetchone()[0] > 0:
                 st.sidebar.warning(f"Upload batch for '{up.name}' (Category: {final_category}, File Type: {final_file_type or 'N/A'}, Import From: {upload_submission_date_str}) seems duplicate. Processing anyway.")
-                # Not stopping for duplicates, just warning.
 
-            # --- Read and Prepare Excel Data ---
             df_excel_full = pd.read_excel(io.BytesIO(data))
-            df_excel_full.columns = [str(col).strip().lower().replace('\n', ' ').replace('\r', '') for col in df_excel_full.columns]
+            
+            original_columns = list(df_excel_full.columns)
+            normalized_columns = [str(col).strip().lower().replace('\n', ' ').replace('\r', '') for col in df_excel_full.columns]
+            df_excel_full.columns = normalized_columns
+            
+            print(f"DEBUG: Normalized Excel Columns for file '{up.name}': {normalized_columns}")
 
-            # --- Define Column Names (Standardized) ---
+            # --- Define Column Name Constants (Lowercase) ---
             EXCEL_CODE_COL = 'code'
             STD_EXCEL_ISSUES_COL = 'issues'
-            STD_EXCEL_BRANCH_COL = 'branch'
+            STD_EXCEL_BRANCH_COL = 'branch' # Standard branch column name (might contain name or code)
             STD_EXCEL_AM_COL = 'area manager'
             STD_EXCEL_DATE_COL = 'date'
+
             CCTV_EXCEL_VIOLATION_COL = 'choose the violation - اختر المخالفه'
             CCTV_EXCEL_SHIFT_COL = 'choose the shift - اختر الشفت'
-            CCTV_EXCEL_DATE_COL = 'date submitted'
-            CCTV_EXCEL_BRANCH_COL = 'branch' # Same as standard, but context matters
-            CCTV_EXCEL_AM_COL = 'area manager' # Same as standard
-            COMP_PERF_EXCEL_BRANCH_NAME_COL = 'اختر الفرع'
+            CCTV_EXCEL_DATE_COL = 'date submitted' # Specific date column for CCTV
+            CCTV_EXCEL_BRANCH_COL = 'branch' # Can be same as standard
+            CCTV_EXCEL_AM_COL = 'area manager' # Can be same as standard
+
+            # Updated for "complaints" / "performance" based on new schema
+            COMP_PERF_EXCEL_BRANCH_NAME_COL = 'branch' # Excel header is "branch" (contains name like "SHRUH B10")
+            # EXCEL_CODE_COL ('code') is already defined and used for the branch code "B10"
             COMP_PERF_EXCEL_TYPE_COL = 'نوع الشكوى'
             COMP_PERF_EXCEL_PRODUCT_COL = 'الشكوى على اي منتج؟'
             COMP_PERF_EXCEL_QUALITY_COL = 'فى حاله كانت الشكوى جوده برجاء تحديد نوع الشكوى'
             COMP_PERF_EXCEL_ORDER_ERROR_COL = 'فى حاله خطاء فى الطلب برجاء تحديد نوع الشكوى'
-            COMP_PERF_EXCEL_DATE_COL = 'date submitted'
+            COMP_PERF_EXCEL_DATE_COL = 'date' # Excel header for date is "date"
 
-            # --- Determine Required Columns and Date Column Based on Category/Type ---
             required_cols_for_upload = []
             date_column_in_excel = ''
 
@@ -262,38 +265,42 @@ if is_admin:
             elif final_category == 'complaints':
                 if final_file_type == 'performance':
                     required_cols_for_upload = [
-                        EXCEL_CODE_COL, COMP_PERF_EXCEL_BRANCH_NAME_COL,
-                        COMP_PERF_EXCEL_TYPE_COL, COMP_PERF_EXCEL_PRODUCT_COL,
-                        COMP_PERF_EXCEL_QUALITY_COL, COMP_PERF_EXCEL_ORDER_ERROR_COL,
-                        COMP_PERF_EXCEL_DATE_COL
+                        COMP_PERF_EXCEL_BRANCH_NAME_COL, # 'branch' (for name)
+                        EXCEL_CODE_COL,                 # 'code' (for code)
+                        COMP_PERF_EXCEL_TYPE_COL,
+                        COMP_PERF_EXCEL_PRODUCT_COL,
+                        COMP_PERF_EXCEL_QUALITY_COL,
+                        COMP_PERF_EXCEL_ORDER_ERROR_COL,
+                        COMP_PERF_EXCEL_DATE_COL        # 'date' (for submission date)
                     ]
                     date_column_in_excel = COMP_PERF_EXCEL_DATE_COL
                 elif final_file_type == 'اغلاق الشكاوي':
                     st.sidebar.error(f"Schema for 'complaints / اغلاق الشكاوي' is not yet implemented. Aborted.")
                     st.stop()
-                else: # Should not happen due to initial validation
+                else:
                     st.sidebar.error(f"Internal error: Invalid file type '{final_file_type}' for 'complaints'. Aborted.")
                     st.stop()
             elif final_category == 'visits':
-                # For 'visits', assume at least 'code' and 'date' are needed. Other columns are optional.
-                required_cols_for_upload = [EXCEL_CODE_COL, STD_EXCEL_DATE_COL] # Example minimum
+                required_cols_for_upload = [EXCEL_CODE_COL, STD_EXCEL_DATE_COL]
                 date_column_in_excel = STD_EXCEL_DATE_COL
-            else: # Standard uploads (operation-training, missing, meal training)
+            else:
                 required_cols_for_upload = [EXCEL_CODE_COL, STD_EXCEL_ISSUES_COL, STD_EXCEL_BRANCH_COL, STD_EXCEL_AM_COL, STD_EXCEL_DATE_COL]
                 date_column_in_excel = STD_EXCEL_DATE_COL
 
-            # --- Validate Missing Columns ---
             missing_cols_detected = [col for col in required_cols_for_upload if col not in df_excel_full.columns]
             if missing_cols_detected:
                 st.sidebar.error(f"Excel for '{final_category}' / '{final_file_type or 'N/A'}' is missing columns: {', '.join(list(set(missing_cols_detected)))}. Aborted.")
+                st.sidebar.info(f"Normalized columns found in Excel: {list(df_excel_full.columns)}")
+                st.sidebar.info(f"Expected columns were: {required_cols_for_upload}")
                 st.stop()
-            if not date_column_in_excel: # Should be set if required_cols_for_upload was correctly defined
+
+            if not date_column_in_excel:
                 st.sidebar.error(f"Internal error: Date column not defined for '{final_category}' / '{final_file_type or 'N/A'}'. Aborted.")
                 st.stop()
 
-            # --- Date Parsing and Filtering ---
             if date_column_in_excel not in df_excel_full.columns:
                 st.sidebar.error(f"The expected date column '{date_column_in_excel}' was not found in the Excel file after header normalization. Aborted.")
+                st.sidebar.info(f"Normalized columns found in Excel: {list(df_excel_full.columns)}")
                 st.stop()
 
             df_excel_full['parsed_date'] = pd.to_datetime(df_excel_full[date_column_in_excel], errors='coerce')
@@ -312,9 +319,8 @@ if is_admin:
 
             if df_to_import.empty:
                 st.sidebar.info(f"No rows found in '{up.name}' matching the import date range ({imp_from_dt:%Y-%m-%d} to {imp_to_dt:%Y-%m-%d}). No data imported.")
-                st.stop() # Stop if no data to import for the selected range
+                st.stop()
 
-            # --- Database Insertion ---
             c.execute('INSERT INTO uploads (filename, uploader, timestamp, file_type, category, submission_date, file) VALUES (?, ?, ?, ?, ?, ?, ?)',
                       (up.name, current_user, ts, final_file_type, final_category, upload_submission_date_str, sqlite3.Binary(data)))
             upload_id = c.lastrowid
@@ -323,14 +329,19 @@ if is_admin:
 
             for _, row in df_to_import.iterrows():
                 issue_date_str = row['parsed_date'].strftime('%Y-%m-%d')
-                code_val_from_excel = str(row[EXCEL_CODE_COL]) if pd.notna(row[EXCEL_CODE_COL]) else ""
+                # Universal 'code' column for branch code
+                code_val_from_excel = str(row[EXCEL_CODE_COL]) if pd.notna(row.get(EXCEL_CODE_COL)) else "" # .get for safety
 
-                issue_val = "N/A" # Default
-                am_val = "N/A"    # Default
-                shift_val = None  # Default
-                actual_branch_name_in_excel_for_fallback = "Unknown Branch"
+                issue_val = "N/A"
+                am_val = "N/A"
+                shift_val = None
+                actual_branch_name_in_excel_for_fallback = "Unknown Branch" # Default
 
                 if final_category == 'complaints' and final_file_type == 'performance':
+                    # For "complaints", the 'branch' column from Excel contains the descriptive name.
+                    # The 'code' column from Excel contains the code.
+                    # `code_val_from_excel` is already taken from EXCEL_CODE_COL ('code').
+                    # `actual_branch_name_in_excel_for_fallback` should come from COMP_PERF_EXCEL_BRANCH_NAME_COL ('branch')
                     actual_branch_name_in_excel_for_fallback = str(row.get(COMP_PERF_EXCEL_BRANCH_NAME_COL, "Unknown Branch (Complaints)"))
                     am_val = "N/A - Complaints"
                     details = []
@@ -353,11 +364,11 @@ if is_admin:
                     shift_val = str(row.get(CCTV_EXCEL_SHIFT_COL)) if pd.notna(row.get(CCTV_EXCEL_SHIFT_COL)) else None
 
                 elif final_category == 'visits':
-                    actual_branch_name_in_excel_for_fallback = str(row.get(STD_EXCEL_BRANCH_COL, "Unknown Visit Branch"))
-                    am_val = str(row.get(STD_EXCEL_AM_COL, "N/A - Visits"))
-                    issue_val = str(row.get(STD_EXCEL_ISSUES_COL, "Visit Logged")) # Default if 'issues' column is missing or empty
+                    actual_branch_name_in_excel_for_fallback = str(row.get(STD_EXCEL_BRANCH_COL, "Unknown Visit Branch")) # Assumes 'branch' col
+                    am_val = str(row.get(STD_EXCEL_AM_COL, "N/A - Visits")) # Assumes 'area manager' col
+                    issue_val = str(row.get(STD_EXCEL_ISSUES_COL, "Visit Logged")) # Assumes 'issues' col
 
-                else: # Standard
+                else: # Standard (operation-training, missing, meal training)
                     actual_branch_name_in_excel_for_fallback = str(row.get(STD_EXCEL_BRANCH_COL, "Unknown Branch (Standard)"))
                     am_val = str(row.get(STD_EXCEL_AM_COL, "N/A"))
                     issue_val = str(row.get(STD_EXCEL_ISSUES_COL, "N/A"))
@@ -371,8 +382,8 @@ if is_admin:
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
                           (upload_id, code_val_from_excel, issue_val, standardized_branch_name, am_val, issue_date_str, final_file_type, shift_val))
                 inserted_issue_count += 1
-            
-            conn.commit() # Commit after all issues for this upload are inserted
+
+            conn.commit()
             st.sidebar.success(f"Successfully imported {inserted_issue_count} issues from '{up.name}'.")
             if unmapped_branch_codes:
                 st.sidebar.warning(f"Unmapped branch codes encountered. Original Excel branch name was used for: {', '.join(sorted(list(unmapped_branch_codes)))}. Consider updating BRANCH_SCHEMA.")
@@ -381,21 +392,15 @@ if is_admin:
             conn.rollback()
             st.sidebar.error(f"Database error during import: {e_sql}. Transaction rolled back.")
         except KeyError as e_key:
-            # This key error might occur if a column used in row.get() or row[] is unexpectedly missing
-            # despite earlier checks. Should be rare if column checks are thorough.
             conn.rollback()
             st.sidebar.error(f"Column access error: Missing key {e_key} during data processing for '{final_category}/{final_file_type or 'N/A'}'. Transaction rolled back.")
         except Exception as e_general:
             conn.rollback()
             st.sidebar.error(f"An unexpected error occurred processing '{up.name}': {e_general}. Transaction rolled back.")
         finally:
-            # The st.rerun() will refresh the page and widgets, including the file uploader.
-            # It ensures that after an upload attempt (success or failure with message),
-            # the UI is in a clean state for the next action.
             st.rerun()
 
 
-    # --- Manage Submissions & Database Backup ---
     st.sidebar.subheader("Manage Submissions")
     df_uploads_raw_for_delete = pd.read_sql('SELECT id, filename, uploader, timestamp, file_type, category, submission_date FROM uploads ORDER BY submission_date DESC, timestamp DESC', conn)
     df_uploads_raw_for_delete['display_submission_date_fmt'] = df_uploads_raw_for_delete['submission_date'].apply(lambda d: datetime.strptime(str(d),'%Y-%m-%d').strftime('%Y-%m-%d') if pd.notna(d) else "N/A")
@@ -437,7 +442,6 @@ default_wk = shutil.which('wkhtmltopdf') or 'not found'
 wk_path = st.sidebar.text_input("wkhtmltopdf path (for PDF reports):", default_wk, help="Required for PDF generation.")
 
 
-# --- Data Loading for Dashboard ---
 df_uploads_raw_main = pd.read_sql('SELECT id, filename, uploader, timestamp, file_type, category, submission_date FROM uploads ORDER BY submission_date DESC, timestamp DESC', conn)
 def format_display_date(d): return datetime.strptime(str(d),'%Y-%m-%d').strftime('%Y-%m-%d') if pd.notna(d) else "N/A"
 df_uploads_raw_main['display_submission_date_fmt'] = df_uploads_raw_main['submission_date'].apply(format_display_date)
@@ -449,9 +453,8 @@ sel_id = int(sel_display.split(' - ')[0]) if sel_display != 'All uploads' else N
 df_all_issues = pd.read_sql('SELECT i.*, u.category as upload_category, u.id as upload_id_col FROM issues i JOIN uploads u ON u.id = i.upload_id', conn, parse_dates=['date'])
 if df_all_issues.empty:
     st.warning("No issues data in database. Please upload data using Admin Controls.")
-    st.stop() # Stop if no data to display on dashboard
+    st.stop()
 
-# --- Dashboard Filters ---
 st.sidebar.subheader("Dashboard Filters")
 min_overall_date = df_all_issues['date'].min().date() if pd.notna(df_all_issues['date'].min()) else date.today()
 max_overall_date = df_all_issues['date'].max().date() if pd.notna(df_all_issues['date'].max()) else date.today()
@@ -465,7 +468,6 @@ cat_opts = ['All'] + sorted(df_all_issues['upload_category'].astype(str).unique(
 am_opts = ['All'] + sorted(df_all_issues['area_manager'].astype(str).unique().tolist()); sel_am = st.sidebar.multiselect("Area Manager:", am_opts, default=['All'], key="area_manager_filter")
 file_type_filter_opts = ['All'] + sorted(df_all_issues['report_type'].astype(str).unique().tolist()); sel_ft = st.sidebar.multiselect("File Type (from Upload Batch):", file_type_filter_opts, default=['All'], key="file_type_filter")
 
-# --- Period Comparison Setup ---
 st.sidebar.subheader("📊 Period Comparison")
 enable_comparison = st.sidebar.checkbox("Enable Period Comparison", key="enable_comparison_checkbox")
 comparison_date_range_1, comparison_date_range_2 = None, None
@@ -484,7 +486,6 @@ if enable_comparison:
         else: st.sidebar.warning("Period 2: Invalid date range."); comparison_date_range_2 = None
     else: st.sidebar.warning("Period 1: Invalid date range."); comparison_date_range_1 = None; comparison_date_range_2 = None
 
-# --- Apply Filters for Main Display ---
 def apply_general_filters(df_input, sel_upload_id_val, selected_branches, selected_categories, selected_managers, selected_file_types):
     df_filtered = df_input.copy()
     if sel_upload_id_val: df_filtered = df_filtered[df_filtered['upload_id_col'] == sel_upload_id_val]
@@ -506,7 +507,6 @@ else:
 st.subheader(f"Filtered Issues for Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}")
 st.write(f"Total issues found in primary period: {len(df_primary_period)}")
 
-# --- Charting Functions ---
 def create_bar_chart(df_source, group_col, title_suffix=""):
     title = f"Issues by {group_col.replace('_',' ').title()} {title_suffix}"
     if group_col not in df_source.columns: return None
@@ -531,7 +531,6 @@ def create_pie_chart(df_source, group_col, title_suffix=""):
         if not data.empty: return px.pie(data, names=group_col, values='count', title=title, hole=0.3, template="plotly_white")
     return None
 
-# --- Primary Period Display ---
 figs_primary = {}
 if df_primary_period.empty:
     st.info("No data matches the current filter criteria for the primary period.")
@@ -600,7 +599,6 @@ else:
         else:
             st.info("No non-empty issue descriptions found for 'Top Issues' (Primary Period).")
 
-# --- Comparison Period Logic & Display ---
 df_comp1, df_comp2 = pd.DataFrame(), pd.DataFrame()
 if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
     st.markdown("---"); st.header("📊 Period Comparison Results (Based on Issue Dates)")
@@ -681,7 +679,6 @@ else:
     if enable_comparison:
         st.warning("Comparison periods not properly set. Please check the date ranges.")
 
-# --- Downloads Section ---
 st.sidebar.subheader("Downloads")
 if 'df_primary_period' in locals() and not df_primary_period.empty:
     st.sidebar.markdown("**Primary Period Data:**")
