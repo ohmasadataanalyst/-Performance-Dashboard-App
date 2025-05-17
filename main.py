@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go # CORRECTED IMPORT
+import plotly.graph_objects as go
 import bcrypt
 import sqlite3
 import io
@@ -320,11 +320,11 @@ cat_opts = ['All'] + sorted(df_all_issues['upload_category'].astype(str).unique(
 am_opts = ['All'] + sorted(df_all_issues['area_manager'].astype(str).unique().tolist()); sel_am = st.sidebar.multiselect("Area Manager:", am_opts, default=['All'], key="area_manager_filter")
 file_type_filter_opts = ['All'] + sorted(df_all_issues['report_type'].astype(str).unique().tolist()); sel_ft = st.sidebar.multiselect("File Type (from Upload Batch):", file_type_filter_opts, default=['All'], key="file_type_filter")
 
-# New filter for Shift (primarily for CCTV data)
-shift_opts_raw = df_all_issues['shift'].dropna().unique() # Get unique non-null shifts
-shift_opts = ['All'] + sorted([str(s) for s in shift_opts_raw if s]) # Ensure they are strings and not empty
-sel_shift = st.sidebar.multiselect("Shift (CCTV):", shift_opts, default=['All'], key="shift_filter")
-
+# --- REMOVED SHIFT FILTER ---
+# shift_opts_raw = df_all_issues['shift'].dropna().unique()
+# shift_opts = ['All'] + sorted([str(s) for s in shift_opts_raw if s])
+# sel_shift = st.sidebar.multiselect("Shift (CCTV):", shift_opts, default=['All'], key="shift_filter")
+# --- END REMOVED SHIFT FILTER ---
 
 st.sidebar.subheader("📊 Period Comparison")
 enable_comparison = st.sidebar.checkbox("Enable Period Comparison", key="enable_comparison_checkbox")
@@ -343,19 +343,20 @@ if enable_comparison:
         else: comparison_date_range_2 = None
     else: comparison_date_range_1 = None; comparison_date_range_2 = None
 
-def apply_general_filters(df_input, sel_upload_id_val, selected_branches, selected_categories, selected_managers, selected_file_types, selected_shifts):
+def apply_general_filters(df_input, sel_upload_id_val, selected_branches, selected_categories, selected_managers, selected_file_types): # sel_shift removed
     df_filtered = df_input.copy()
     if sel_upload_id_val: df_filtered = df_filtered[df_filtered['upload_id_col'] == sel_upload_id_val]
     if 'All' not in selected_branches: df_filtered = df_filtered[df_filtered['branch'].isin(selected_branches)]
     if 'All' not in selected_categories: df_filtered = df_filtered[df_filtered['upload_category'].isin(selected_categories)]
     if 'All' not in selected_managers: df_filtered = df_filtered[df_filtered['area_manager'].isin(selected_managers)]
     if 'All' not in selected_file_types: df_filtered = df_filtered[df_filtered['report_type'].isin(selected_file_types)]
-    if 'All' not in selected_shifts:
-        # This will filter for specific shifts. Rows with NULL shift (non-CCTV or CCTV without shift) will be excluded.
-        df_filtered = df_filtered[df_filtered['shift'].isin(selected_shifts)]
+    # --- Shift filter logic removed ---
+    # if 'All' not in selected_shifts:
+    #     df_filtered = df_filtered[df_filtered['shift'].isin(selected_shifts)]
+    # --- End shift filter logic removed ---
     return df_filtered
 
-df_temp_filtered = apply_general_filters(df_all_issues, sel_id, sel_branch, sel_cat, sel_am, sel_ft, sel_shift)
+df_temp_filtered = apply_general_filters(df_all_issues, sel_id, sel_branch, sel_cat, sel_am, sel_ft) # sel_shift removed from call
 df_primary_period = df_temp_filtered.copy()
 if primary_date_range and len(primary_date_range) == 2:
     start_date_filt, end_date_filt = primary_date_range[0], primary_date_range[1]
@@ -384,15 +385,23 @@ if df_primary_period.empty:
     st.info("No data matches the current filter criteria for the primary period.")
 else:
     figs_primary = {}
-    # Adjust columns for charts; if shift chart is prominent, give it space
-    chart_cols = st.columns(2) # Default to 2, can be 3 if shift chart is common
+    chart_cols = st.columns(2)
 
     with chart_cols[0]:
         figs_primary['Branch'] = create_bar_chart(df_primary_period, 'branch', '(Primary)')
         if figs_primary['Branch']: st.plotly_chart(figs_primary['Branch'], use_container_width=True)
 
-        figs_primary['Report Type'] = create_bar_chart(df_primary_period, 'report_type', '(Primary)')
+        # --- MODIFICATION FOR REPORT TYPE CHART ---
+        df_report_type_viz = df_primary_period.copy()
+        if 'upload_category' in df_report_type_viz.columns and 'report_type' in df_report_type_viz.columns:
+            # Conditionally rename 'issues' to 'CCTV issues' for visualization
+            condition = (df_report_type_viz['report_type'] == 'issues') & \
+                        (df_report_type_viz['upload_category'] == 'CCTV')
+            df_report_type_viz.loc[condition, 'report_type'] = 'CCTV issues'
+        
+        figs_primary['Report Type'] = create_bar_chart(df_report_type_viz, 'report_type', '(Primary)')
         if figs_primary['Report Type']: st.plotly_chart(figs_primary['Report Type'], use_container_width=True)
+        # --- END MODIFICATION FOR REPORT TYPE CHART ---
 
     with chart_cols[1]:
         figs_primary['Area Manager'] = create_pie_chart(df_primary_period, 'area_manager', '(Primary)')
@@ -401,13 +410,13 @@ else:
         figs_primary['Category'] = create_bar_chart(df_primary_period, 'upload_category', '(Primary)')
         if figs_primary['Category']: st.plotly_chart(figs_primary['Category'], use_container_width=True)
 
-    # Conditionally display Shift chart if there's shift data (typically CCTV)
+    # Conditionally display Shift chart (related to CCTV uploads, if shift data exists)
+    # This chart will show actual shift values like "6 PM - 12 AM"
     if 'shift' in df_primary_period.columns and df_primary_period['shift'].notna().any():
-        # You might want a dedicated column or place it thoughtfully
-        with st.container(): # Or one of the chart_cols if space allows
-            figs_primary['Shift'] = create_bar_chart(df_primary_period[df_primary_period['shift'].notna()], 'shift', '(Primary - CCTV Shifts)')
-            if figs_primary['Shift']:
-                st.plotly_chart(figs_primary['Shift'], use_container_width=True)
+        with st.container():
+            figs_primary['Shift_Values'] = create_bar_chart(df_primary_period[df_primary_period['shift'].notna()], 'shift', '(Primary - CCTV Shift Times)')
+            if figs_primary['Shift_Values']:
+                st.plotly_chart(figs_primary['Shift_Values'], use_container_width=True)
 
 
     if 'date' in df_primary_period.columns and pd.api.types.is_datetime64_any_dtype(df_primary_period['date']) and not df_primary_period['date'].isnull().all():
@@ -425,18 +434,22 @@ else:
 
     if len(df_primary_period) < 50 or (primary_date_range and primary_date_range[0] == primary_date_range[1]):
         st.subheader("Detailed Records (Primary Period - Filtered)")
-        # Added 'shift' to the detailed records
         display_columns = ['date', 'branch', 'report_type', 'upload_category', 'issues', 'area_manager', 'code']
         if 'shift' in df_primary_period.columns and df_primary_period['shift'].notna().any():
             display_columns.append('shift')
         
         df_display_primary = df_primary_period[display_columns].copy()
+        # Apply the same renaming for the 'report_type' column in the detailed table if it's 'CCTV' and 'issues'
+        if 'upload_category' in df_display_primary.columns and 'report_type' in df_display_primary.columns:
+            condition_table = (df_display_primary['report_type'] == 'issues') & \
+                              (df_display_primary['upload_category'] == 'CCTV')
+            df_display_primary.loc[condition_table, 'report_type'] = 'CCTV issues'
+
         if pd.api.types.is_datetime64_any_dtype(df_display_primary['date']): df_display_primary['date'] = df_display_primary['date'].dt.strftime('%Y-%m-%d')
         st.dataframe(df_display_primary, use_container_width=True)
 
     st.subheader("Top Issues (Primary Period - Filtered)")
     if 'issues' in df_primary_period.columns and not df_primary_period['issues'].isnull().all():
-        # For CCTV, 'issues' column contains the violation type, so this will show top violations.
         top_issues_primary = df_primary_period['issues'].astype(str).value_counts().head(20).rename_axis('Issue/Violation Description').reset_index(name='Frequency')
         if not top_issues_primary.empty: st.dataframe(top_issues_primary, use_container_width=True)
 
@@ -475,7 +488,7 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                 df_combined_branch = pd.concat(dfs_to_concat)
                 if not df_combined_branch.empty:
                     branch_comp_data = df_combined_branch.groupby(['branch', 'period_label']).size().reset_index(name='count')
-                    if not branch_comp_.empty:
+                    if not branch_comp_data.empty:
                         fig_branch_comp = px.bar(branch_comp_data, x='branch', y='count', color='period_label', barmode='group', title='Issues by Branch (Comparison)')
                         st.plotly_chart(fig_branch_comp, use_container_width=True)
             st.markdown("#### Period-Level Trend (Average Daily Issues)")
@@ -503,24 +516,22 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
             html_content += f"<h1>Visuals Report (Primary: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d})</h1>"
             
             chart_titles_in_order = ["Branch", "Area Manager", "Report Type", "Category"]
-            if 'Shift' in figs_primary and figs_primary['Shift'] is not None: # Check if Shift chart exists
-                chart_titles_in_order.append("Shift")
-            chart_titles_in_order.append("Trend") # Trend is usually last
+            if 'Shift_Values' in figs_primary and figs_primary['Shift_Values'] is not None: # Check if Shift chart exists
+                chart_titles_in_order.append("Shift_Values") # Use the correct key
+            chart_titles_in_order.append("Trend")
 
             for title_key in chart_titles_in_order:
                 if figs_primary.get(title_key):
                     fig_obj = figs_primary[title_key]
                     try:
-                        img_bytes = fig_obj.to_image(format='png', engine='kaleido', scale=1.5) # scale can be adjusted
+                        img_bytes = fig_obj.to_image(format='png', engine='kaleido', scale=1.5)
                         b64_img = base64.b64encode(img_bytes).decode()
                         
-                        # Try to get title from fig object, fallback to key
                         actual_chart_title = title_key
                         if hasattr(fig_obj, 'layout') and hasattr(fig_obj.layout, 'title') and fig_obj.layout.title and hasattr(fig_obj.layout.title, 'text') and fig_obj.layout.title.text:
                             actual_chart_title = fig_obj.layout.title.text
                         else:
-                            actual_chart_title = title_key.replace('_', ' ').title()
-
+                            actual_chart_title = title_key.replace('_', ' ').replace('Values',' Times').title() # Adjust for 'Shift_Values'
 
                         html_content += f"<h2>{actual_chart_title}</h2><img src='data:image/png;base64,{b64_img}' alt='{actual_chart_title}'/>"
                     except Exception as e_img:
@@ -543,12 +554,17 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
             html_full = "<head><meta charset='utf-8'><style>body{font-family:sans-serif;} table{border-collapse:collapse;width:100%;} th,td{border:1px solid #ddd;padding:8px;text-align:left;} th{background-color:#f2f2f2;}</style></head>"
             html_full += f"<h1>Dashboard Report (Primary: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d})</h1>"
             
-            # Define columns for PDF table, including shift if relevant
             pdf_table_cols = ['date', 'branch', 'report_type', 'upload_category', 'issues', 'area_manager', 'code']
             if 'shift' in df_primary_period.columns and df_primary_period['shift'].notna().any():
                 pdf_table_cols.append('shift')
             
             df_pdf_view = df_primary_period[pdf_table_cols].copy()
+            # Apply the same renaming for the 'report_type' column in the PDF table
+            if 'upload_category' in df_pdf_view.columns and 'report_type' in df_pdf_view.columns:
+                condition_pdf_table = (df_pdf_view['report_type'] == 'issues') & \
+                                      (df_pdf_view['upload_category'] == 'CCTV')
+                df_pdf_view.loc[condition_pdf_table, 'report_type'] = 'CCTV issues'
+
             if pd.api.types.is_datetime64_any_dtype(df_pdf_view['date']): df_pdf_view['date'] = df_pdf_view['date'].dt.strftime('%Y-%m-%d')
             html_full += df_pdf_view.to_html(index=False, classes="dataframe", border=0)
             pdf_full_bytes = generate_pdf(html_full, fname='dashboard_report_primary.pdf', wk_path=wk_path)
