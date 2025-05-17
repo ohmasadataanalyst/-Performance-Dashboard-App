@@ -30,7 +30,7 @@ BRANCH_SCHEMA_NORMALIZED = {str(k).strip().upper(): v for k, v in BRANCH_SCHEMA.
 
 # --- Database setup ---
 DB_PATH = 'issues.db'
-conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
+conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10) # Increased timeout
 c = conn.cursor()
 
 c.execute('''CREATE TABLE IF NOT EXISTS uploads (
@@ -80,16 +80,16 @@ if 'db_critical_error_msg' in st.session_state: st.error(f"DB Startup Error: {st
 if 'db_schema_updated_flag_uploads' in st.session_state and st.session_state.db_schema_updated_flag_uploads: st.toast("DB 'uploads' table schema updated.", icon="ℹ️"); st.session_state.db_schema_updated_flag_uploads = False
 if 'db_schema_updated_flag_issues' in st.session_state and st.session_state.db_schema_updated_flag_issues: st.toast("DB 'issues' table schema updated.", icon="ℹ️"); st.session_state.db_schema_updated_flag_issues = False
 
-LOGO_PATH = "company_logo.png"
+LOGO_PATH = "company_logo.png" # Ensure this file exists in the same directory or provide full path
 
 def check_login():
     if 'authenticated' not in st.session_state: st.session_state.update({'authenticated': False, 'user_name': None, 'user_role': None})
     if not st.session_state.authenticated:
-        col1_lgn, col2_lgn = st.columns([2,6])
+        col1_lgn, col2_lgn = st.columns([1,5]) # Adjusted column ratio for logo
         with col1_lgn:
-            try: st.image(LOGO_PATH, width=120)
-            except Exception: pass
-        with col2_lgn: st.title("📊 Login - Dashboard")
+            try: st.image(LOGO_PATH, width=100) # Adjusted logo size
+            except Exception: st.empty() # Silently fail if logo not found
+        with col2_lgn: st.title("📊 Login - Performance Dashboard")
         st.subheader("Please log in to continue")
         with st.form("login_form"):
             username = st.text_input("Full Name:", key="auth_username_login").strip().lower()
@@ -98,7 +98,7 @@ def check_login():
             if submitted:
                 if username in db_admin and bcrypt.checkpw(password.encode(), db_admin[username]):
                     st.session_state.update({'authenticated': True, 'user_name': username, 'user_role': 'admin'}); st.rerun()
-                elif username in view_only and password: # Any non-empty password for view-only
+                elif username in view_only and password: # Simplified: any non-empty password for view_only
                     st.session_state.update({'authenticated': True, 'user_name': username, 'user_role': 'view_only'}); st.rerun()
                 elif username in view_only and not password: st.error("Password cannot be empty for view-only users.")
                 elif username or password: st.error("Invalid username or password.")
@@ -108,9 +108,9 @@ def check_login():
 
 if not check_login(): st.stop()
 
-col1_main_title, col2_main_title = st.columns([2, 6])
+col1_main_title, col2_main_title = st.columns([1, 5]) # Adjusted column ratio
 with col1_main_title:
-    try: st.image(LOGO_PATH, width=120)
+    try: st.image(LOGO_PATH, width=100) # Adjusted logo size
     except Exception as e: st.error(f"Error loading logo: {e}")
 with col2_main_title: st.title("📊 Classic Dashboard for Performance")
 
@@ -125,15 +125,21 @@ def generate_pdf(html, fname='report.pdf', wk_path=None):
     if not wk_path or wk_path == "not found": st.error("wkhtmltopdf path not set."); return None
     try:
         import pdfkit; config = pdfkit.configuration(wkhtmltopdf=wk_path)
-        options = {'enable-local-file-access': None, 'images': None, 'encoding': "UTF-8", 'load-error-handling': 'ignore', 'load-media-error-handling': 'ignore'}
-        pdfkit.from_string(html, fname, configuration=config, options=options)
-        with open(fname, 'rb') as f: return f.read()
-    except Exception as e: st.error(f"PDF error: {e}"); return None
+        options = {'enable-local-file-access': None, 'images': None, 'encoding': "UTF-8", 
+                   'load-error-handling': 'ignore', 'load-media-error-handling': 'ignore',
+                   'disable-smart-shrinking': None, 'zoom': '0.8'} # Added zoom for better fit
+        pdf_bytes = pdfkit.from_string(html, False, configuration=config, options=options) # Output as bytes
+        return pdf_bytes
+    except FileNotFoundError: # Specifically catch if wkhtmltopdf is not found at path
+        st.error(f"wkhtmltopdf not found at path: {wk_path}. Please ensure it's installed and the path is correct.")
+        return None
+    except Exception as e: st.error(f"PDF generation error: {e}"); return None
 
 st.sidebar.header("🔍 Filters & Options")
 
 if is_admin:
     st.sidebar.subheader("Admin Controls")
+    # ... (Admin upload logic remains the same as in your provided fixed code) ...
     st.sidebar.markdown("Set parameters, select Excel, specify import date range, then upload.")
     selected_category_admin = st.sidebar.selectbox("Category for upload", options=all_categories, key="admin_category_select")
     valid_file_types_admin = category_file_types.get(selected_category_admin, [])
@@ -184,7 +190,7 @@ if is_admin:
                     if 'code' not in df_excel_full.columns: missing_cols_detected.append('code')
                     if branch_column_in_excel not in df_excel_full.columns: missing_cols_detected.append(branch_column_in_excel)
                     
-                    unique_missing_cols = list(set(missing_cols_detected))
+                    unique_missing_cols = list(set(missing_cols_detected)) # Remove duplicates
                     if unique_missing_cols:
                         st.sidebar.error(f"Excel for '{final_category}' is missing: {', '.join(unique_missing_cols)}. Aborted.")
                     else:
@@ -205,7 +211,8 @@ if is_admin:
                                 upload_id = c.lastrowid
                                 unmapped_codes = set()
                                 for _, row in df_to_import.iterrows():
-                                    code_val, branch_excel = str(row.get('code', "")), str(row.get(branch_column_in_excel, "Unknown"))
+                                    code_val = str(row.get('code', "")) # Use .get for safety
+                                    branch_excel = str(row.get(branch_column_in_excel, "Unknown Branch"))
                                     norm_code = code_val.strip().upper()
                                     std_branch = BRANCH_SCHEMA_NORMALIZED.get(norm_code, branch_excel)
                                     if norm_code and norm_code not in BRANCH_SCHEMA_NORMALIZED: unmapped_codes.add(norm_code)
@@ -220,9 +227,9 @@ if is_admin:
                                               (upload_id, code_val, issue_val, std_branch, am_val, issue_date_str, final_file_type, shift_val))
                                 if unmapped_codes: st.sidebar.warning(f"Unmapped codes (original name used): {', '.join(sorted(list(unmapped_codes)))}.")
                                 conn.commit(); st.sidebar.success(f"Imported {len(df_to_import)} issues from '{up.name}'."); st.rerun()
-            except sqlite3.Error as e: conn.rollback(); st.sidebar.error(f"DB error: {e}. Rolled back.")
-            except KeyError as e: conn.rollback(); st.sidebar.error(f"Column error: {e} not in Excel for '{final_category}'. Rolled back.")
-            except Exception as e: conn.rollback(); st.sidebar.error(f"Error processing '{up.name}': {e}. Rolled back.")
+            except sqlite3.Error as e: conn.rollback(); st.sidebar.error(f"DB error during import: {e}. Rolled back.")
+            except KeyError as e: conn.rollback(); st.sidebar.error(f"Column error during import: {e} not found in Excel for '{final_category}'. Rolled back.")
+            except Exception as e: conn.rollback(); st.sidebar.error(f"General error processing '{up.name}': {e}. Rolled back.")
 
     st.sidebar.subheader("Manage Submissions")
     df_uploads_del = pd.read_sql('SELECT id, filename, uploader, category, file_type, submission_date FROM uploads ORDER BY submission_date DESC, timestamp DESC', conn)
@@ -236,7 +243,7 @@ if is_admin:
             except sqlite3.Error as e: conn.rollback(); st.sidebar.error(f"Failed to delete: {e}")
 
     st.sidebar.subheader("Database Management")
-    st.sidebar.markdown("""**To persist data changes:** 1. Click "Download DB". 2. Rename to `issues.db`. 3. Replace in Git project. 4. Commit & push.""")
+    st.sidebar.markdown("""**To persist data changes (e.g., on Streamlit Cloud):** 1. Click "Download DB". 2. Rename to `issues.db`. 3. Replace in Git project. 4. Commit & push.""")
     if os.path.exists(DB_PATH):
         with open(DB_PATH, "rb") as fp: db_bytes = fp.read()
         ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -244,7 +251,7 @@ if is_admin:
     else: st.sidebar.warning(f"'{DB_PATH}' not found.")
 
 default_wk = shutil.which('wkhtmltopdf') or 'not found'
-wk_path = st.sidebar.text_input("wkhtmltopdf path:", default_wk)
+wk_path = st.sidebar.text_input("wkhtmltopdf path (for PDF reports):", default_wk, help="Path to wkhtmltopdf executable. Required for PDF downloads.")
 
 df_uploads_main = pd.read_sql('SELECT id, filename, category, file_type, submission_date FROM uploads ORDER BY submission_date DESC, timestamp DESC', conn)
 df_uploads_main['display_date'] = df_uploads_main['submission_date'].apply(lambda d: datetime.strptime(str(d),'%Y-%m-%d').strftime('%Y-%m-%d') if pd.notna(d) else "N/A")
@@ -254,7 +261,7 @@ sel_display_scope = st.sidebar.selectbox("Select upload batch to analyze:", scop
 sel_upload_id = int(sel_display_scope.split(' - ')[0]) if sel_display_scope != 'All uploads' else None
 
 df_all_issues = pd.read_sql('SELECT i.*, u.category as upload_category, u.id as upload_id_col FROM issues i JOIN uploads u ON u.id = i.upload_id', conn, parse_dates=['date'])
-if df_all_issues.empty: st.warning("No issues data in database."); st.stop()
+if df_all_issues.empty: st.warning("No issues data in database. Please upload data first."); st.stop()
 
 st.sidebar.subheader("Dashboard Filters")
 min_date_overall, max_date_overall = (df_all_issues['date'].min().date() if pd.notna(df_all_issues['date'].min()) else date.today(),
@@ -265,19 +272,19 @@ primary_date_range = st.sidebar.date_input("Primary Date Range (Issue Dates):",
 if not primary_date_range or len(primary_date_range) != 2: primary_date_range = [min_date_overall, max_date_overall]
 
 sel_branch = st.sidebar.multiselect("Branch:", ['All'] + sorted(df_all_issues['branch'].astype(str).unique()), default=['All'], key="branch_flt")
-sel_cat = st.sidebar.multiselect("Category:", ['All'] + sorted(df_all_issues['upload_category'].astype(str).unique()), default=['All'], key="cat_flt")
+sel_cat = st.sidebar.multiselect("Category (from Upload):", ['All'] + sorted(df_all_issues['upload_category'].astype(str).unique()), default=['All'], key="cat_flt")
 sel_am = st.sidebar.multiselect("Area Manager:", ['All'] + sorted(df_all_issues['area_manager'].astype(str).unique()), default=['All'], key="am_flt")
-sel_ft = st.sidebar.multiselect("File Type:", ['All'] + sorted(df_all_issues['report_type'].astype(str).unique()), default=['All'], key="ft_flt")
+sel_ft = st.sidebar.multiselect("File Type (from Upload):", ['All'] + sorted(df_all_issues['report_type'].astype(str).unique()), default=['All'], key="ft_flt")
 
 st.sidebar.subheader("📊 Period Comparison")
 enable_comp = st.sidebar.checkbox("Enable Period Comparison", key="enable_comp_cb")
-comp_range_1, comp_range_2 = None, None
+comp_range_1, comp_range_2 = None, None # Initialize
 if enable_comp:
     st.sidebar.markdown("**Comparison Period 1 (Issue Dates):**")
     def_p1_end = min(min_date_overall + timedelta(days=6), max_date_overall)
-    def_p1_end = max(def_p1_end, min_date_overall)
+    def_p1_end = max(def_p1_end, min_date_overall) # Ensure end is not before start
     comp_range_1_val = st.sidebar.date_input("Start & End (P1):", value=[min_date_overall, def_p1_end], min_value=min_date_overall, max_value=max_date_overall, key="comp_p1_flt")
-    if comp_range_1_val and len(comp_range_1_val) == 2:
+    if comp_range_1_val and len(comp_range_1_val) == 2 and comp_range_1_val[0] <= comp_range_1_val[1]:
         comp_range_1 = comp_range_1_val
         st.sidebar.markdown("**Comparison Period 2 (Issue Dates):**")
         def_p2_start = min(comp_range_1[1] + timedelta(days=1), max_date_overall)
@@ -285,9 +292,10 @@ if enable_comp:
         def_p2_end = min(def_p2_start + timedelta(days=6), max_date_overall)
         def_p2_end = max(def_p2_end, def_p2_start)
         comp_range_2_val = st.sidebar.date_input("Start & End (P2):", value=[def_p2_start, def_p2_end], min_value=min_date_overall, max_value=max_date_overall, key="comp_p2_flt")
-        if comp_range_2_val and len(comp_range_2_val) == 2: comp_range_2 = comp_range_2_val
-        else: comp_range_2 = None
-    else: comp_range_1, comp_range_2 = None, None
+        if comp_range_2_val and len(comp_range_2_val) == 2 and comp_range_2_val[0] <= comp_range_2_val[1]: comp_range_2 = comp_range_2_val
+        else: st.sidebar.warning("Period 2: End date must be after start date."); comp_range_2 = None
+    else: st.sidebar.warning("Period 1: End date must be after start date."); comp_range_1, comp_range_2 = None, None
+
 
 def apply_filters(df, up_id, branches, cats, ams, fts):
     df_f = df.copy()
@@ -300,12 +308,13 @@ def apply_filters(df, up_id, branches, cats, ams, fts):
 
 df_filtered_general = apply_filters(df_all_issues, sel_upload_id, sel_branch, sel_cat, sel_am, sel_ft)
 df_primary_period = df_filtered_general.copy()
-if primary_date_range and len(primary_date_range) == 2:
+if primary_date_range and len(primary_date_range) == 2 and primary_date_range[0] <= primary_date_range[1]:
     s_date, e_date = primary_date_range[0], primary_date_range[1]
     if 'date' in df_primary_period.columns and pd.api.types.is_datetime64_any_dtype(df_primary_period['date']):
         df_primary_period = df_primary_period[(df_primary_period['date'].dt.date >= s_date) & (df_primary_period['date'].dt.date <= e_date)]
 else:
-    df_primary_period = pd.DataFrame(columns=df_filtered_general.columns) # Ensure empty with same columns
+    st.warning("Primary Date Range: End date must be after start date. Displaying all data for other filters.")
+    # df_primary_period remains df_filtered_general if date range is invalid
 
 st.subheader(f"Filtered Issues for Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}")
 st.write(f"Total issues found in primary period: {len(df_primary_period)}")
@@ -313,16 +322,18 @@ st.write(f"Total issues found in primary period: {len(df_primary_period)}")
 def create_chart(df_src, col, chart_type='bar', title_sfx=""):
     title = f"Issues by {col.replace('_',' ').title()} {title_sfx}"
     if col not in df_src.columns or df_src[col].isnull().all(): return None
+    # Ensure the column is treated as string for grouping, especially for mixed types or numbers
     data = df_src.astype({col: str}).groupby(col).size().reset_index(name='count')
     if data.empty: return None
     if chart_type == 'bar': return px.bar(data.sort_values('count', ascending=False), x=col, y='count', title=title, template="plotly_white")
     if chart_type == 'pie': return px.pie(data, names=col, values='count', title=title, hole=0.3, template="plotly_white")
     return None
 
+figs_primary = {} # To store figures for PDF report
+
 if df_primary_period.empty:
     st.info("No data matches current filter criteria for the primary period.")
 else:
-    figs_primary = {}
     chart_cols = st.columns(2)
     with chart_cols[0]:
         figs_primary['Branch'] = create_chart(df_primary_period, 'branch', 'bar', '(Primary)')
@@ -331,7 +342,7 @@ else:
         df_rt_viz = df_primary_period.copy()
         if 'upload_category' in df_rt_viz.columns and 'report_type' in df_rt_viz.columns:
             cond = (df_rt_viz['report_type'] == 'issues') & (df_rt_viz['upload_category'] == 'CCTV')
-            df_rt_viz.loc[cond, 'report_type'] = 'CCTV issues'
+            df_rt_viz.loc[cond, 'report_type'] = 'CCTV issues' # More descriptive
         figs_primary['Report Type'] = create_chart(df_rt_viz, 'report_type', 'bar', '(Primary)')
         if figs_primary['Report Type']: st.plotly_chart(figs_primary['Report Type'], use_container_width=True)
     with chart_cols[1]:
@@ -341,20 +352,20 @@ else:
         if figs_primary['Category']: st.plotly_chart(figs_primary['Category'], use_container_width=True)
 
     if 'shift' in df_primary_period.columns and df_primary_period['shift'].notna().any():
-        with st.container():
+        with st.container(): # Use a container for better layout if needed
             figs_primary['Shift'] = create_chart(df_primary_period[df_primary_period['shift'].notna()], 'shift', 'bar', '(Primary - CCTV Shifts)')
             if figs_primary['Shift']: st.plotly_chart(figs_primary['Shift'], use_container_width=True)
 
     if 'date' in df_primary_period.columns and pd.api.types.is_datetime64_any_dtype(df_primary_period['date']) and not df_primary_period['date'].isnull().all():
-        trend_data = df_primary_period.groupby(df_primary_period['date'].dt.date).size().reset_index(name='issues')
+        trend_data = df_primary_period.groupby(df_primary_period['date'].dt.date).size().reset_index(name='daily_issues')
         trend_data['date'] = pd.to_datetime(trend_data['date']); trend_data.sort_values('date', inplace=True)
         if not trend_data.empty:
-            win = max(2, min(7, len(trend_data)))
-            trend_data[f'{win}-Day MA'] = trend_data['issues'].rolling(window=win, center=True, min_periods=1).mean().round(1)
+            win = max(2, min(7, len(trend_data))) # Ensure window size is at least 2 if possible
+            trend_data[f'{win}-Day MA'] = trend_data['daily_issues'].rolling(window=win, center=True, min_periods=1).mean().round(1)
             fig_trend = go.Figure()
-            fig_trend.add_trace(go.Bar(x=trend_data['date'], y=trend_data['issues'], name='Daily Issues', marker_color='lightblue', hovertemplate="<b>%{x|%A, %b %d}</b><br>Issues: %{y}<extra></extra>"))
+            fig_trend.add_trace(go.Bar(x=trend_data['date'], y=trend_data['daily_issues'], name='Daily Issues', marker_color='lightblue', hovertemplate="<b>%{x|%A, %b %d}</b><br>Issues: %{y}<extra></extra>"))
             fig_trend.add_trace(go.Scatter(x=trend_data['date'], y=trend_data[f'{win}-Day MA'], name=f'{win}-Day Moving Avg.', mode='lines+markers', line=dict(color='royalblue', width=2), marker=dict(size=5), hovertemplate="<b>%{x|%A, %b %d}</b><br>Moving Avg: %{y:.1f}<extra></extra>"))
-            fig_trend.update_layout(title='Issues Trend (Primary Period)', xaxis_title='Date', yaxis_title='Number of Issues', template="plotly_white", hovermode="x unified")
+            fig_trend.update_layout(title_text='Issues Trend (Primary Period - Based on Issue Dates)', xaxis_title='Date', yaxis_title='Number of Issues', template="plotly_white", hovermode="x unified", legend_title_text='Metric')
             figs_primary['Trend'] = fig_trend; st.plotly_chart(figs_primary['Trend'], use_container_width=True)
 
     if len(df_primary_period) < 50 or (primary_date_range and primary_date_range[0] == primary_date_range[1]):
@@ -367,44 +378,161 @@ else:
             cond_tbl = (df_disp['report_type'] == 'issues') & (df_disp['upload_category'] == 'CCTV')
             df_disp.loc[cond_tbl, 'report_type'] = 'CCTV issues'
         if pd.api.types.is_datetime64_any_dtype(df_disp['date']): df_disp['date'] = df_disp['date'].dt.strftime('%Y-%m-%d')
-        st.dataframe(df_disp, use_container_width=True)
+        st.dataframe(df_disp.reset_index(drop=True), use_container_width=True) # Added reset_index
 
     st.subheader("Top Issues (Primary Period - Filtered)")
     if 'issues' in df_primary_period.columns and not df_primary_period['issues'].isnull().all():
-        top_issues = df_primary_period['issues'].astype(str).value_counts().head(20).rename_axis('Issue/Violation').reset_index(name='Frequency')
+        top_issues = df_primary_period['issues'].astype(str).value_counts().head(20).rename_axis('Issue/Violation Description').reset_index(name='Frequency')
         if not top_issues.empty: st.dataframe(top_issues, use_container_width=True)
+
+
+# --- Period Comparison Section ---
+df_comp1_dl, df_comp2_dl = pd.DataFrame(), pd.DataFrame() # Initialize for download section
 
 if enable_comp and comp_range_1 and comp_range_2:
     st.markdown("---"); st.header("📊 Period Comparison Results (Based on Issue Dates)")
-    # Placeholder for comparison logic:
-    # For example, you would filter df_all_issues for comp_range_1 and comp_range_2
-    # then generate similar charts or comparative statistics.
-    # df_comp1 = apply_filters(df_all_issues, sel_upload_id, sel_branch, sel_cat, sel_am, sel_ft)
-    # df_comp1 = df_comp1[(df_comp1['date'].dt.date >= comp_range_1[0]) & (df_comp1['date'].dt.date <= comp_range_1[1])]
-    # df_comp2 = apply_filters(df_all_issues, sel_upload_id, sel_branch, sel_cat, sel_am, sel_ft)
-    # df_comp2 = df_comp2[(df_comp2['date'].dt.date >= comp_range_2[0]) & (df_comp2['date'].dt.date <= comp_range_2[1])]
-    # st.write(f"Period 1 ({comp_range_1[0]:%Y-%m-%d} to {comp_range_1[1]:%Y-%m-%d}): {len(df_comp1)} issues")
-    # st.write(f"Period 2 ({comp_range_2[0]:%Y-%m-%d} to {comp_range_2[1]:%Y-%m-%d}): {len(df_comp2)} issues")
-    st.info("Comparison logic is not fully implemented yet.") # Example message
-    pass # Ensures the if-block is syntactically correct
 
+    df_comp1_base = apply_filters(df_all_issues, sel_upload_id, sel_branch, sel_cat, sel_am, sel_ft)
+    df_comp1 = df_comp1_base[(df_comp1_base['date'].dt.date >= comp_range_1[0]) & (df_comp1_base['date'].dt.date <= comp_range_1[1])].copy()
+    
+    df_comp2_base = apply_filters(df_all_issues, sel_upload_id, sel_branch, sel_cat, sel_am, sel_ft)
+    df_comp2 = df_comp2_base[(df_comp2_base['date'].dt.date >= comp_range_2[0]) & (df_comp2_base['date'].dt.date <= comp_range_2[1])].copy()
+
+    p1_label = f"Period 1 ({comp_range_1[0]:%Y-%m-%d} to {comp_range_1[1]:%Y-%m-%d})"
+    p2_label = f"Period 2 ({comp_range_2[0]:%Y-%m-%d} to {comp_range_2[1]:%Y-%m-%d})"
+
+    st.subheader("Overall Issue Counts")
+    col_summary1, col_summary2 = st.columns(2)
+    col_summary1.metric(label=p1_label, value=f"{len(df_comp1)} issues")
+    col_summary2.metric(label=p2_label, value=f"{len(df_comp2)} issues")
+    
+    if df_comp1.empty and df_comp2.empty:
+        st.info("No data found for comparison in either period with current filters.")
+    else:
+        st.subheader("Issues by Branch Comparison")
+        comp_col1, comp_col2 = st.columns(2)
+        with comp_col1:
+            if not df_comp1.empty:
+                fig_c1_branch = create_chart(df_comp1, 'branch', 'bar', f'({p1_label.split(" (")[1][:-1]})') # Shorter label for chart
+                if fig_c1_branch: st.plotly_chart(fig_c1_branch, use_container_width=True)
+                else: st.info(f"No branch data for {p1_label}.")
+            else: st.info(f"No data for {p1_label}.")
+        with comp_col2:
+            if not df_comp2.empty:
+                fig_c2_branch = create_chart(df_comp2, 'branch', 'bar', f'({p2_label.split(" (")[1][:-1]})') # Shorter label for chart
+                if fig_c2_branch: st.plotly_chart(fig_c2_branch, use_container_width=True)
+                else: st.info(f"No branch data for {p2_label}.")
+            else: st.info(f"No data for {p2_label}.")
+
+        st.subheader("Top Issues Comparison")
+        comp_col_issues1, comp_col_issues2 = st.columns(2)
+        with comp_col_issues1:
+            st.markdown(f"**Top 10 Issues ({p1_label})**")
+            if not df_comp1.empty and 'issues' in df_comp1.columns:
+                top_issues_c1 = df_comp1['issues'].astype(str).value_counts().head(10).rename_axis('Issue').reset_index(name='Frequency')
+                if not top_issues_c1.empty: st.dataframe(top_issues_c1.reset_index(drop=True), use_container_width=True)
+                else: st.info(f"No issues data for {p1_label}.")
+            else: st.info(f"No data for {p1_label}.")
+        with comp_col_issues2:
+            st.markdown(f"**Top 10 Issues ({p2_label})**")
+            if not df_comp2.empty and 'issues' in df_comp2.columns:
+                top_issues_c2 = df_comp2['issues'].astype(str).value_counts().head(10).rename_axis('Issue').reset_index(name='Frequency')
+                if not top_issues_c2.empty: st.dataframe(top_issues_c2.reset_index(drop=True), use_container_width=True)
+                else: st.info(f"No issues data for {p2_label}.")
+            else: st.info(f"No data for {p2_label}.")
+        
+        # Store dfs for download section
+        df_comp1_dl = df_comp1.copy()
+        df_comp2_dl = df_comp2.copy()
+
+# --- Downloads Section ---
 st.sidebar.subheader("Downloads")
+
+# Primary Period Downloads
 if 'df_primary_period' in locals() and not df_primary_period.empty:
-    # Placeholder for download logic:
+    st.sidebar.markdown("**Primary Period Data:**")
     try:
         csv_primary = df_primary_period.to_csv(index=False).encode('utf-8')
-        st.sidebar.download_button(
-            label="Download Primary Data (CSV)",
-            data=csv_primary,
+        st.sidebar.download_button(label="Download Primary (CSV)", data=csv_primary,
             file_name=f"primary_data_{primary_date_range[0]:%Y%m%d}_{primary_date_range[1]:%Y%m%d}.csv",
-            mime="text/csv",
-            key="download_primary_csv_btn"
-        )
-    except Exception as e:
-        st.sidebar.error(f"Error preparing download: {e}")
-    pass # Ensures the if-block is syntactically correct, even if download fails or is just this
+            mime="text/csv", key="dl_primary_csv")
+    except Exception as e: st.sidebar.error(f"Primary CSV Error: {e}")
+
+    try:
+        output_excel = io.BytesIO()
+        with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
+            df_primary_period.to_excel(writer, index=False, sheet_name='PrimaryData')
+        excel_data = output_excel.getvalue()
+        st.sidebar.download_button(label="Download Primary (Excel)", data=excel_data,
+            file_name=f"primary_data_{primary_date_range[0]:%Y%m%d}_{primary_date_range[1]:%Y%m%d}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_primary_xlsx")
+    except Exception as e: st.sidebar.error(f"Primary Excel Error: {e}")
+
+    if st.sidebar.button("Generate PDF Report (Primary)", key="gen_pdf_primary_btn"):
+        if wk_path and wk_path != 'not found':
+            with st.spinner("Generating PDF Report for Primary Period..."):
+                html_report = f"<h1>Performance Report: Primary Period</h1>"
+                html_report += f"<h2>Date Range: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}</h2>"
+                html_report += f"<p><strong>Total Issues:</strong> {len(df_primary_period)}</p><hr>"
+                
+                for chart_name, fig_obj in figs_primary.items(): # figs_primary is populated earlier
+                    if fig_obj:
+                        try:
+                            img_bytes = fig_obj.to_image(format="png", scale=1.2, width=700, height=450) # Control size
+                            img_b64 = base64.b64encode(img_bytes).decode()
+                            html_report += f"<h3>{chart_name}</h3>"
+                            html_report += f'<div style="text-align:center;"><img src="data:image/png;base64,{img_b64}" style="max-width:95%; height:auto; border: 1px solid #ddd;"></div><hr>'
+                        except Exception as e_fig: html_report += f"<p><i>Error generating image for chart '{chart_name}': {e_fig}</i></p><hr>"
+                
+                if 'issues' in df_primary_period.columns and not df_primary_period['issues'].isnull().all():
+                    top_issues_pdf = df_primary_period['issues'].astype(str).value_counts().head(10).rename_axis('Issue/Violation').reset_index(name='Frequency')
+                    if not top_issues_pdf.empty:
+                        html_report += "<h3>Top 10 Issues</h3>"
+                        html_report += top_issues_pdf.to_html(index=False, classes='styled-table', border=0)
+                
+                html_report += """
+                <style> body { font-family: Arial, sans-serif; margin: 20px; } h1, h2, h3 { color: #333; } hr { border: 0; height: 1px; background: #ccc; margin: 20px 0; }
+                    .styled-table { border-collapse: collapse; margin: 15px 0; font-size: 0.9em; width: 100%; box-shadow: 0 0 10px rgba(0, 0, 0, 0.05); }
+                    .styled-table thead tr { background-color: #007bff; color: #ffffff; text-align: left; }
+                    .styled-table th, .styled-table td { padding: 10px 12px; border: 1px solid #ddd; }
+                    .styled-table tbody tr:nth-of-type(even) { background-color: #f8f8f8; }
+                    .styled-table tbody tr:hover { background-color: #f1f1f1; }
+                </style>"""
+                pdf_file_bytes = generate_pdf(html_report, wk_path=wk_path)
+                if pdf_file_bytes:
+                    st.sidebar.download_button(label="Download PDF Report", data=pdf_file_bytes,
+                        file_name=f"Performance_Report_Primary_{primary_date_range[0]:%Y%m%d}_{primary_date_range[1]:%Y%m%d}.pdf",
+                        mime="application/pdf", key="dl_pdf_primary_final_btn")
+                    st.sidebar.success("Primary PDF report ready!")
+                # else: st.sidebar.error("Failed to generate PDF for Primary Period.") # Error already shown by generate_pdf
+        else: st.sidebar.warning("wkhtmltopdf path not configured. PDF generation disabled.")
 else:
     st.sidebar.info("No primary data to download based on current filters.")
 
+# Comparison Period Downloads
+if enable_comp and comp_range_1 and comp_range_2:
+    st.sidebar.markdown("**Comparison Period Data:**")
+    if not df_comp1_dl.empty:
+        try:
+            csv_c1 = df_comp1_dl.to_csv(index=False).encode('utf-8')
+            st.sidebar.download_button(label=f"Download P1 Data (CSV)", data=csv_c1,
+                file_name=f"comp_P1_{comp_range_1[0]:%Y%m%d}_{comp_range_1[1]:%Y%m%d}.csv", mime="text/csv", key="dl_comp1_csv")
+        except Exception as e: st.sidebar.error(f"P1 CSV Error: {e}")
+    else: st.sidebar.caption(f"No data for P1 ({comp_range_1[0]:%b %d}-{comp_range_1[1]:%b %d}) to download.")
+
+    if not df_comp2_dl.empty:
+        try:
+            csv_c2 = df_comp2_dl.to_csv(index=False).encode('utf-8')
+            st.sidebar.download_button(label=f"Download P2 Data (CSV)", data=csv_c2,
+                file_name=f"comp_P2_{comp_range_2[0]:%Y%m%d}_{comp_range_2[1]:%Y%m%d}.csv", mime="text/csv", key="dl_comp2_csv")
+        except Exception as e: st.sidebar.error(f"P2 CSV Error: {e}")
+    else: st.sidebar.caption(f"No data for P2 ({comp_range_2[0]:%b %d}-{comp_range_2[1]:%b %d}) to download.")
+
+
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Database: {DB_PATH} (Local SQLite)")
+
+# Ensure session state for comparison dataframes is cleaned up if comparison is disabled
+if not enable_comp:
+    if 'df_comp1_for_download' in st.session_state: del st.session_state['df_comp1_for_download']
+    if 'df_comp2_for_download' in st.session_state: del st.session_state['df_comp2_for_download']
