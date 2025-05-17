@@ -45,11 +45,11 @@ BRANCH_SCHEMA = {
     "B29": "Event B29",
     "B30": "QADRUH B30",
     "B31": "ANRUH B31",
-    "B32": "FAYJED B32",
+    "B32": "FAYJED B32", # This was previously 'fihaa b32' in your image, updated based on schema
     "B33": "HIRJED B33",
     "B34": "URURUH B34",
     "LB01": "Alaqeq Branch LB01",
-    "LB02": "Alkhaleej Branch LB02",
+    "LB02": "Alkhaleej Branch LB02", # This was 'Alkhaleej B02' in your image
     "QB01": "As Suwaidi Branch QB01",
     "QB02": "Al Nargis Branch QB02",
     "TW01": "Twesste B01 TW01"
@@ -153,7 +153,7 @@ def check_login():
             if submitted:
                 if username in db_admin and bcrypt.checkpw(password.encode(), db_admin[username]):
                     st.session_state.authenticated = True; st.session_state.user_name = username; st.session_state.user_role = 'admin'; st.rerun()
-                elif username in view_only and password: # Assuming view_only also need a password
+                elif username in view_only and password:
                     st.session_state.authenticated = True; st.session_state.user_name = username; st.session_state.user_role = 'view_only'; st.rerun()
                 elif username in view_only and not password: st.error("Password cannot be empty for view-only users.")
                 elif username or password: st.error("Invalid username or password.")
@@ -233,7 +233,7 @@ if is_admin:
 
                     missing_cols_detected = []
                     date_column_in_excel = ''
-                    branch_column_in_excel = 'branch' # Assuming it's always 'branch' after standardization
+                    branch_column_in_excel = 'branch' # Standardized column name from Excel
 
                     if final_category == 'CCTV':
                         required_cols_cctv = ['code', 'choose the violation - اختر المخالفه', 'choose the shift - اختر الشفت', 'date submitted', 'branch', 'area manager']
@@ -270,15 +270,15 @@ if is_admin:
 
                                 for _, row in df_to_import.iterrows():
                                     issue_date_str = row['parsed_date'].strftime('%Y-%m-%d')
-                                    code_val = str(row['code']).strip().upper() # Normalize code for lookup
+                                    code_val_from_excel = str(row['code']) # Keep original code for DB insert if needed
+                                    normalized_code_for_lookup = code_val_from_excel.strip().upper()
+                                    
                                     original_branch_from_excel = row[branch_column_in_excel]
                                     
-                                    # --- Apply Branch Standardization ---
-                                    standardized_branch_name = BRANCH_SCHEMA_NORMALIZED.get(code_val, original_branch_from_excel)
-                                    if code_val not in BRANCH_SCHEMA_NORMALIZED and code_val not in unmapped_codes:
-                                        unmapped_codes.add(code_val)
-                                    # --- End Branch Standardization ---
-
+                                    standardized_branch_name = BRANCH_SCHEMA_NORMALIZED.get(normalized_code_for_lookup, original_branch_from_excel)
+                                    if normalized_code_for_lookup not in BRANCH_SCHEMA_NORMALIZED and normalized_code_for_lookup not in unmapped_codes:
+                                        unmapped_codes.add(normalized_code_for_lookup)
+                                    
                                     am_val = row['area manager']
 
                                     if final_category == 'CCTV':
@@ -286,12 +286,12 @@ if is_admin:
                                         shift_val = row['choose the shift - اختر الشفت']
                                         c.execute('''INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type, shift)
                                                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                                                  (upload_id, row['code'], issue_val, standardized_branch_name, am_val, issue_date_str, final_file_type, shift_val))
+                                                  (upload_id, code_val_from_excel, issue_val, standardized_branch_name, am_val, issue_date_str, final_file_type, shift_val))
                                     else:
                                         issue_val = row['issues']
                                         c.execute('''INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type, shift)
                                                      VALUES (?, ?, ?, ?, ?, ?, ?, NULL)''',
-                                                  (upload_id, row['code'], issue_val, standardized_branch_name, am_val, issue_date_str, final_file_type))
+                                                  (upload_id, code_val_from_excel, issue_val, standardized_branch_name, am_val, issue_date_str, final_file_type))
                                 
                                 if unmapped_codes:
                                     st.sidebar.warning(f"Unmapped branch codes found (original branch name used): {', '.join(sorted(list(unmapped_codes)))}")
