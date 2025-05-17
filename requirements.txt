@@ -5,3 +5,4 @@ plotly
 bcrypt
 pdfkit
 kaleido
+xlsxwriter
