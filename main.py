@@ -92,6 +92,10 @@ category_file_types = {
 }
 all_categories = list(category_file_types.keys())
 
+# --- Global definitions for complaint parsing ---
+MULTI_VALUE_COMPLAINT_COLS = ['Complaint Type', 'Quality Issue Detail', 'Order Error Detail']
+
+
 if 'db_critical_error_msg' in st.session_state:
     st.error(f"DB Startup Error: {st.session_state.db_critical_error_msg}"); del st.session_state.db_critical_error_msg
 if 'db_schema_updated_flag_uploads' in st.session_state and st.session_state.db_schema_updated_flag_uploads:
@@ -123,7 +127,7 @@ def check_login():
 
                 if admin_hashed_pw and bcrypt.checkpw(password.encode('utf-8'), admin_hashed_pw):
                     st.session_state.authenticated = True; st.session_state.user_name = username_input; st.session_state.user_role = 'admin'; st.rerun()
-                elif username_lower in view_only and password: # Password required for view_only
+                elif username_lower in view_only and password:
                     st.session_state.authenticated = True; st.session_state.user_name = username_input; st.session_state.user_role = 'view_only'; st.rerun()
                 elif username_lower in view_only and not password: st.error("Password cannot be empty for view-only users.")
                 elif username_input or password: st.error("Invalid username or password.")
@@ -242,7 +246,7 @@ if is_admin:
             CCTV_EXCEL_DATE_COL = 'date submitted'
             CCTV_EXCEL_BRANCH_COL = 'branch'
             CCTV_EXCEL_AM_COL = 'area manager'
-            COMP_PERF_EXCEL_BRANCH_NAME_COL = 'branch' # Corrected to 'branch' as per sample
+            COMP_PERF_EXCEL_BRANCH_NAME_COL = 'branch'
             COMP_PERF_EXCEL_TYPE_COL = 'نوع الشكوى'
             COMP_PERF_EXCEL_PRODUCT_COL = 'الشكوى على اي منتج؟'
             COMP_PERF_EXCEL_QUALITY_COL = 'فى حاله كانت الشكوى جوده برجاء تحديد نوع الشكوى'
@@ -494,13 +498,12 @@ def apply_general_filters(df_input, sel_upload_id_val, selected_branches, select
     if 'All' not in selected_categories: df_filtered = df_filtered[df_filtered['upload_category'].isin(selected_categories)]
     if 'All' not in selected_managers: df_filtered = df_filtered[df_filtered['area_manager'].isin(selected_managers)]
     if 'All' not in selected_file_types_val:
-        # Handle None/NaN in report_type if 'none'/'nan' is explicitly selected, otherwise filter them out
         is_na_report_type = df_filtered['report_type'].isnull() | df_filtered['report_type'].astype(str).str.lower().isin(['none', 'nan'])
         selected_ft_lower = [str(ft).lower() for ft in selected_file_types_val]
 
-        if "none" in selected_ft_lower or "nan" in selected_ft_lower: # User wants to see 'None' types
+        if "none" in selected_ft_lower or "nan" in selected_ft_lower:
             df_filtered = df_filtered[df_filtered['report_type'].isin(selected_file_types_val) | is_na_report_type]
-        else: # User does not want 'None' types, filter them out along with applying selection
+        else:
              df_filtered = df_filtered[df_filtered['report_type'].isin(selected_file_types_val) & ~is_na_report_type]
     return df_filtered
 
@@ -528,9 +531,8 @@ def create_bar_chart(df_source, group_col, title_suffix="", chart_title=None, co
         return None
 
     df_valid_data = df_source.copy()
-    df_valid_data.dropna(subset=[group_col], inplace=True) # Drop rows where the group_col itself is NaN
+    df_valid_data.dropna(subset=[group_col], inplace=True)
 
-    # Ensure group_col is string and stripped, and filter out empty strings or common placeholders for NaN
     df_valid_data[group_col] = df_valid_data[group_col].astype(str).str.strip()
     df_valid_data = df_valid_data[df_valid_data[group_col] != '']
     df_valid_data = df_valid_data[~df_valid_data[group_col].str.lower().isin(['nan', 'none', '<na>'])]
@@ -572,7 +574,6 @@ def parse_complaint_details(issue_string):
             value_str = match.group(1).strip()
             if value_str:
                 if is_multi_value:
-                    # Split by comma, then strip each part. Filter out empty strings.
                     return [s.strip() for s in value_str.split(',') if s.strip()]
                 return value_str
         return [] if is_multi_value else None
@@ -661,7 +662,6 @@ def display_complaints_performance_dashboard(df_complaints_raw):
         st.info("No complaints data available for performance analysis with current filters.")
         return
 
-    # st.write("DEBUG: Raw complaints data for dashboard:", df_complaints_raw.head()) # DEBUG
     parsed_details = df_complaints_raw['issues'].apply(parse_complaint_details)
     df_complaints = pd.concat([df_complaints_raw.reset_index(drop=True).drop(columns=['issues'], errors='ignore'),
                                parsed_details.reset_index(drop=True)], axis=1)
@@ -673,32 +673,19 @@ def display_complaints_performance_dashboard(df_complaints_raw):
         'Order Error': 'Order Error Detail'
     }, inplace=True)
 
-    # Crucial step: Ensure multi-value fields are lists of individual, non-comma-separated strings
-    multi_value_complaint_cols = ['Complaint Type', 'Quality Issue Detail', 'Order Error Detail']
-    for col_name in multi_value_complaint_cols:
+    # Use the globally defined MULTI_VALUE_COMPLAINT_COLS
+    for col_name in MULTI_VALUE_COMPLAINT_COLS:
         if col_name in df_complaints.columns:
             def _sanitize_and_split_elements(entry_list_or_str):
-                if not isinstance(entry_list_or_str, list): # If not a list (e.g. string from failed parsing)
-                    if isinstance(entry_list_or_str, str):
-                        entry_list_or_str = [entry_list_or_str] # Treat as a list with one item
-                    else:
-                        return [] # Not a list or string, return empty list
-
+                if not isinstance(entry_list_or_str, list):
+                    if isinstance(entry_list_or_str, str): entry_list_or_str = [entry_list_or_str]
+                    else: return []
                 final_elements = []
                 for element in entry_list_or_str:
-                    if isinstance(element, str):
-                        final_elements.extend([s.strip() for s in element.split(',') if s.strip()])
-                    elif element is not None : # Handle other types if necessary, or ignore
-                        final_elements.append(str(element).strip())
+                    if isinstance(element, str): final_elements.extend([s.strip() for s in element.split(',') if s.strip()])
+                    elif element is not None : final_elements.append(str(element).strip())
                 return final_elements
             df_complaints[col_name] = df_complaints[col_name].apply(_sanitize_and_split_elements)
-
-    # st.write("DEBUG: `df_complaints` after sanitizing multi-value columns (sample):") # DEBUG
-    # for col_name in multi_value_complaint_cols: # DEBUG
-    #     if col_name in df_complaints.columns: # DEBUG
-    #         st.write(f"Column: {col_name}") # DEBUG
-    #         st.write(df_complaints[col_name].head()) # DEBUG
-
 
     col1, col2 = st.columns(2)
     with col1:
@@ -770,7 +757,7 @@ def display_complaints_performance_dashboard(df_complaints_raw):
     if 'date' in df_display_complaints.columns and pd.api.types.is_datetime64_any_dtype(df_display_complaints['date']):
         df_display_complaints['date'] = df_display_complaints['date'].dt.strftime('%Y-%m-%d')
 
-    for col in ['Complaint Type', 'Quality Issue Detail', 'Order Error Detail']:
+    for col in MULTI_VALUE_COMPLAINT_COLS: # Use global definition
         if col in df_display_complaints.columns:
             df_display_complaints[col] = df_display_complaints[col].apply(lambda x: ', '.join(x) if isinstance(x, list) and x else (x if not isinstance(x,list) else ''))
     st.dataframe(df_display_complaints.reset_index(drop=True), use_container_width=True)
@@ -780,9 +767,6 @@ def display_complaints_performance_dashboard(df_complaints_raw):
 figs_primary = {}
 
 if not df_primary_period.empty:
-    # st.write("DEBUG: `df_primary_period` category/type counts (before main display logic):") # DEBUG
-    # st.write(df_primary_period[['upload_category', 'report_type']].value_counts(dropna=False)) # DEBUG
-
     is_purely_complaints_perf = (
         (df_primary_period['upload_category'] == 'complaints').all() and
         (df_primary_period['report_type'] == 'performance').all() and
@@ -796,23 +780,16 @@ if not df_primary_period.empty:
     else:
         st.subheader("General Performance Analysis (Primary Period)")
         display_general_dashboard(df_primary_period.copy(), figs_primary)
-
-        # st.write("DEBUG: General dashboard path. Checking for complaints subset...") # DEBUG
-        # st.write(f"DEBUG: Shape of df_primary_period: {df_primary_period.shape}") # DEBUG
         
         df_complaints_subset_in_primary = df_primary_period[
             (df_primary_period['upload_category'] == 'complaints') &
             (df_primary_period['report_type'] == 'performance')
         ].copy()
         
-        # st.write(f"DEBUG: Shape of `df_complaints_subset_in_primary`: {df_complaints_subset_in_primary.shape}") # DEBUG
-
         if not df_complaints_subset_in_primary.empty:
             st.markdown("---")
             st.subheader("Complaints Analysis (Subset of Primary Period)")
             display_complaints_performance_dashboard(df_complaints_subset_in_primary)
-        # else: # DEBUG
-            # st.write("DEBUG: `df_complaints_subset_in_primary` is EMPTY.") # DEBUG
 else:
     st.info("No data matches the current filter criteria for the primary period.")
 
@@ -850,11 +827,10 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
             df_comp2_parsed.rename(columns={'Type': 'Complaint Type'}, inplace=True)
             df_comp2_parsed['period_label'] = p2_label
 
-            # Apply the same sanitization as in the main complaints dashboard
             for df_parsed_comp in [df_comp1_parsed, df_comp2_parsed]:
-                for col_name in multi_value_complaint_cols: # Defined in display_complaints_performance_dashboard scope
+                for col_name in MULTI_VALUE_COMPLAINT_COLS: # Use global definition
                     if col_name in df_parsed_comp.columns:
-                        def _sanitize_and_split_elements_comp(entry_list_or_str): # Renamed to avoid conflict if any
+                        def _sanitize_and_split_elements_comp(entry_list_or_str):
                             if not isinstance(entry_list_or_str, list):
                                 if isinstance(entry_list_or_str, str): entry_list_or_str = [entry_list_or_str]
                                 else: return []
@@ -880,7 +856,7 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                 else: st.caption("No valid complaint types after exploding for comparison.")
             else: st.caption("No combined complaints data for comparison.")
         
-        else: # General comparison
+        else: 
             st.subheader("Overall Issue Counts")
             col_summary1, col_summary2 = st.columns(2)
             col_summary1.metric(label=f"Total Issues ({p1_label})", value=f"{len(df_comp1)}")
@@ -975,9 +951,8 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
             parsed_details_excel = df_primary_excel_export['issues'].apply(parse_complaint_details)
             df_primary_excel_export = pd.concat([df_primary_excel_export.reset_index(drop=True).drop(columns=['issues'], errors='ignore'), parsed_details_excel.reset_index(drop=True)], axis=1)
             df_primary_excel_export.rename(columns={'Type': 'Complaint Type', 'Product': 'Product Complained About', 'Quality Detail': 'Quality Issue Detail', 'Order Error': 'Order Error Detail'}, inplace=True)
-            for col_name_excel in ['Complaint Type', 'Quality Issue Detail', 'Order Error Detail']:
+            for col_name_excel in MULTI_VALUE_COMPLAINT_COLS: # Use global definition
                 if col_name_excel in df_primary_excel_export.columns:
-                    # Apply the same sanitization and then join for Excel
                     def _sanitize_and_join_for_excel(entry_list_or_str):
                         if not isinstance(entry_list_or_str, list):
                             if isinstance(entry_list_or_str, str): entry_list_or_str = [entry_list_or_str]
@@ -1045,9 +1020,8 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                 df_pdf_view_final = df_pdf_view_final[pdf_table_cols_exist]
                 if 'date' in df_pdf_view_final.columns and pd.api.types.is_datetime64_any_dtype(df_pdf_view_final['date']):
                     df_pdf_view_final['date'] = df_pdf_view_final['date'].dt.strftime('%Y-%m-%d')
-                for col_name_pdf in ['Complaint Type', 'Quality Issue Detail', 'Order Error Detail']: # For PDF table readability
+                for col_name_pdf in MULTI_VALUE_COMPLAINT_COLS:
                     if col_name_pdf in df_pdf_view_final.columns:
-                        # Apply the same sanitization and then join for PDF
                         def _sanitize_and_join_for_pdf(entry_list_or_str):
                             if not isinstance(entry_list_or_str, list):
                                 if isinstance(entry_list_or_str, str): entry_list_or_str = [entry_list_or_str]
