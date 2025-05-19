@@ -538,30 +538,27 @@ def create_bar_chart(df_source, group_col, title_suffix="", chart_title=None, co
     if not df_valid_data.empty:
         if 'period_label' in df_valid_data.columns:
             data = df_valid_data.groupby([group_col, 'period_label']).size().reset_index(name='count')
-            # For grouped bar charts, sort by the group_col primarily to keep categories together, then by period_label
             data = data.sort_values(by=[group_col, 'period_label'], ascending=[True, True])
             if not data.empty:
                 return px.bar(data, x=group_col, y='count', color='period_label', barmode=barmode, title=final_title, template="plotly_white",
                               color_discrete_sequence=color_sequence if color_sequence else px.colors.qualitative.Plotly)
         else:
-            # For single period charts (e.g., ranking)
-            # If df_source is already grouped and has the sort_values_by col (like 'Total Issues/Complaints' from ranking)
-            if sort_values_by in df_source.columns and group_col in df_source.columns : # direct use for pre-aggregated, pre-sorted data
-                 data_to_plot = df_source.copy()
-                 # Ensure the x-axis (group_col) is treated as categorical for correct order
-                 data_to_plot[group_col] = data_to_plot[group_col].astype(str)
-                 fig = px.bar(data_to_plot, x=group_col, y=sort_values_by, title=final_title, template="plotly_white",
+            # Check if df_source is already aggregated (like for ranking charts)
+            if group_col in df_source.columns and sort_values_by in df_source.columns and group_col != sort_values_by:
+                data_to_plot = df_source.copy()
+                # Ensure the x-axis (group_col) is treated as categorical for correct order if already sorted
+                data_to_plot[group_col] = data_to_plot[group_col].astype(str)
+                fig = px.bar(data_to_plot, x=group_col, y=sort_values_by, title=final_title, template="plotly_white",
                                color_discrete_sequence=color_sequence if color_sequence else px.colors.qualitative.Plotly)
-                 fig.update_xaxes(categoryorder='array', categoryarray=data_to_plot[group_col].tolist()) # Preserve sort order
-                 return fig
-
-            # If df_source is raw and needs grouping
-            data = df_valid_data.groupby(group_col).size().reset_index(name='count')
-            data = data.sort_values(by='count', ascending=sort_ascending)
-
-            if not data.empty:
-                return px.bar(data, x=group_col, y='count', title=final_title, template="plotly_white",
-                              color_discrete_sequence=color_sequence if color_sequence else px.colors.qualitative.Plotly)
+                # Preserve sort order if the data_to_plot was already sorted (e.g. ranking table)
+                fig.update_xaxes(categoryorder='array', categoryarray=data_to_plot[group_col].tolist())
+                return fig
+            else: # df_source is raw and needs grouping
+                data = df_valid_data.groupby(group_col).size().reset_index(name='count')
+                data = data.sort_values(by='count', ascending=sort_ascending)
+                if not data.empty:
+                    return px.bar(data, x=group_col, y='count', title=final_title, template="plotly_white",
+                                  color_discrete_sequence=color_sequence if color_sequence else px.colors.qualitative.Plotly)
     return None
 
 def create_pie_chart(df_source, group_col, title_suffix="", chart_title=None, color_sequence=None):
@@ -811,8 +808,8 @@ if not df_primary_period.empty:
             st.markdown("---")
             st.subheader("Complaints Analysis (Subset of Primary Period)")
             temp_figs_subset_complaints = display_complaints_performance_dashboard(df_complaints_subset_in_primary, temp_figs_subset_complaints)
-            if figs_primary and temp_figs_subset_complaints: # For combined PDF
-                 for key, fig_val in temp_figs_subset_complaints.items(): # Use fig_val to avoid conflict
+            if figs_primary and temp_figs_subset_complaints:
+                 for key, fig_val in temp_figs_subset_complaints.items():
                     figs_primary[f"Subset_{key}"] = fig_val
 
     st.markdown("---")
@@ -852,7 +849,6 @@ else:
     st.info("No data matches the current filter criteria for the primary period.")
 
 # --- Period Comparison Logic ---
-df_comp1, df_comp2 = pd.DataFrame(), pd.DataFrame()
 if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
     st.markdown("---"); st.header("📊 Period Comparison Results (Based on Issue Dates)")
     
@@ -865,7 +861,6 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
     p1_label = f"P1 ({comparison_date_range_1[0]:%b %d} - {comparison_date_range_1[1]:%b %d})"
     p2_label = f"P2 ({comparison_date_range_2[0]:%b %d} - {comparison_date_range_2[1]:%b %d})"
     
-    # Split data into issues and complaints for each period
     df_comp1_complaints = df_comp1_all[(df_comp1_all['upload_category'] == 'complaints') & (df_comp1_all['report_type'] == 'performance')].copy()
     df_comp1_issues = df_comp1_all[~((df_comp1_all['upload_category'] == 'complaints') & (df_comp1_all['report_type'] == 'performance'))].copy()
     
@@ -890,7 +885,8 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
             if not df_parsed_comp_period.empty:
                 for col_name in MULTI_VALUE_COMPLAINT_COLS:
                     if col_name in df_parsed_comp_period.columns:
-                        def _sanitize_and_split_elements_comp(entry_list_or_str):
+                        # _sanitize_and_split_elements_comp defined inline or use a helper
+                        def _sanitize_and_split_elements_comp_local(entry_list_or_str):
                             if not isinstance(entry_list_or_str, list):
                                 if isinstance(entry_list_or_str, str): entry_list_or_str = [entry_list_or_str]
                                 else: return []
@@ -899,7 +895,7 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                                 if isinstance(element, str): final_elements.extend([s.strip() for s in element.split(',') if s.strip()])
                                 elif element is not None: final_elements.append(str(element).strip())
                             return final_elements
-                        df_parsed_comp_period[col_name] = df_parsed_comp_period[col_name].apply(_sanitize_and_split_elements_comp)
+                        df_parsed_comp_period[col_name] = df_parsed_comp_period[col_name].apply(_sanitize_and_split_elements_comp_local)
         
         dfs_to_concat_complaints = []
         if not df_comp1_parsed.empty: dfs_to_concat_complaints.append(df_comp1_parsed)
@@ -985,11 +981,38 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                                                                 color_sequence=COMPLAINTS_COLOR_SEQUENCE)
                     if fig_branch_complaints_comp: st.plotly_chart(fig_branch_complaints_comp, use_container_width=True)
                     else: st.caption("No data for Complaints by Branch comparison chart.")
+                
+                # Average Daily Complaints Trend Comparison
+                st.markdown("#### Period-Level Trend (Average Daily Complaints)")
+                period_summary_data_compl = []
+                if not df_comp1_complaints.empty and 'date' in df_comp1_complaints.columns and not df_comp1_complaints['date'].isnull().all():
+                    avg_compl_p1 = df_comp1_complaints.groupby(df_comp1_complaints['date'].dt.date).size().mean()
+                    period_summary_data_compl.append({'Period': p1_label, 'StartDate': pd.to_datetime(comparison_date_range_1[0]), 'AverageDailyComplaints': round(avg_compl_p1, 2)})
+                
+                if not df_comp2_complaints.empty and 'date' in df_comp2_complaints.columns and not df_comp2_complaints['date'].isnull().all():
+                    avg_compl_p2 = df_comp2_complaints.groupby(df_comp2_complaints['date'].dt.date).size().mean()
+                    period_summary_data_compl.append({'Period': p2_label, 'StartDate': pd.to_datetime(comparison_date_range_2[0]), 'AverageDailyComplaints': round(avg_compl_p2, 2)})
+                
+                if len(period_summary_data_compl) > 0 :
+                    df_period_trend_compl = pd.DataFrame(period_summary_data_compl).sort_values('StartDate')
+                    if not df_period_trend_compl.empty:
+                        chart_title_trend_compl = 'Avg Daily Complaints by Period' if len(df_period_trend_compl) == 1 else 'Trend of Avg Daily Complaints Across Periods'
+                        trend_chart_type_compl = px.bar if len(df_period_trend_compl) == 1 else px.line
+                        
+                        fig_period_level_trend_compl = trend_chart_type_compl(df_period_trend_compl, x='Period', y='AverageDailyComplaints', text='AverageDailyComplaints', 
+                                                                              title=chart_title_trend_compl, markers=(len(df_period_trend_compl) > 1),
+                                                                              color_discrete_sequence=COMPLAINTS_COLOR_SEQUENCE)
+                        fig_period_level_trend_compl.update_traces(texttemplate='%{text:.2f}', textposition='outside' if len(df_period_trend_compl) == 1 else 'top center')
+                        fig_period_level_trend_compl.update_layout(xaxis_title="Comparison Period", yaxis_title="Avg. Daily Complaints", template="plotly_white")
+                        st.plotly_chart(fig_period_level_trend_compl, use_container_width=True)
+                    else: st.info("Not enough data for period-level trend comparison for complaints.")
+                else: st.info("Not enough data for period-level trend comparison for complaints.")
+
             else:
                 st.caption("No combined complaints data for comparison.")
         else:
             st.info("No complaints data found in one or both selected periods for comparison.")
-
+        st.markdown("---") # Separator before general issues comparison
 
     # --- General Issue Comparison (excluding complaints already handled) ---
     if not df_comp1_issues.empty or not df_comp2_issues.empty:
@@ -1055,9 +1078,9 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
             avg_issues_p2_gen = df_comp2_issues.groupby(df_comp2_issues['date'].dt.date).size().mean()
             period_summary_data_issues.append({'Period': p2_label, 'StartDate': pd.to_datetime(comparison_date_range_2[0]), 'AverageDailyIssues': round(avg_issues_p2_gen, 2)})
         
-        if len(period_summary_data_issues) > 0 : # Check if there's any data to plot
+        if len(period_summary_data_issues) > 0 :
             df_period_trend_issues = pd.DataFrame(period_summary_data_issues).sort_values('StartDate')
-            if not df_period_trend_issues.empty:
+            if not df_period_trend_issues.empty: # Ensure DataFrame is not empty
                 chart_title_trend_issues = 'Avg Daily Other Issues by Period' if len(df_period_trend_issues) == 1 else 'Trend of Avg Daily Other Issues Across Periods'
                 trend_chart_type_issues = px.bar if len(df_period_trend_issues) == 1 else px.line
                 
@@ -1066,12 +1089,17 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                 fig_period_level_trend_issues.update_traces(texttemplate='%{text:.2f}', textposition='outside' if len(df_period_trend_issues) == 1 else 'top center')
                 fig_period_level_trend_issues.update_layout(xaxis_title="Comparison Period", yaxis_title="Avg. Daily Other Issues", template="plotly_white")
                 st.plotly_chart(fig_period_level_trend_issues, use_container_width=True)
-            else: st.info("Not enough data for period-level trend comparison for other issues.")
-        else: st.info("Not enough data for period-level trend comparison for other issues.")
-    elif enable_comparison: # If only comparison was enabled but no "other issues" data
+            # else: st.info("Not enough data for period-level trend comparison for other issues (df_period_trend_issues empty).") # More specific info
+        else: st.info("Not enough data for period-level trend comparison for other issues (period_summary_data_issues empty).")
+    elif enable_comparison and (df_comp1_complaints.empty and df_comp2_complaints.empty): # if only complaints section was shown, and no other issues
         st.info("No 'Other Issues' data found in selected periods for comparison.")
+    elif not enable_comparison: # Should not happen if we are in this block
+        pass
+    else: # If comparison enabled but no data at all
+        st.info("No data found in one or both selected periods for any comparison.")
 
-elif enable_comparison: # If comparison was enabled but date ranges were not set
+
+elif enable_comparison: 
     st.warning("Comparison periods not properly set. Please check the date ranges in the sidebar.")
 
 
@@ -1148,13 +1176,13 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
         if 'pdf_complaints_visuals_primary_data' in st.session_state:
             st.sidebar.download_button(label="Download Complaints Visuals PDF", data=st.session_state.pdf_complaints_visuals_primary_data, file_name=f"complaints_visuals_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.pdf", mime="application/pdf", key="action_dl_complaints_visuals_pdf", on_click=lambda: st.session_state.pop('pdf_complaints_visuals_primary_data', None))
     
-    else: # General or Mixed View
+    else: 
         pdf_button_label = "Prepare General Visuals PDF"
-        current_figs_for_pdf = figs_primary.copy() # Start with general or merged general+subset figs
+        current_figs_for_pdf = figs_primary.copy() 
 
         if is_complaints_subset_displayed:
             pdf_button_label = "Prepare Combined Visuals PDF"
-            # temp_figs_subset_complaints would have been merged into figs_primary (now current_figs_for_pdf) by main logic
+            # temp_figs_subset_complaints were already merged into figs_primary in the main display logic
 
         if st.sidebar.button(pdf_button_label, key="prep_general_or_combined_visuals_pdf"):
             if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set.")
@@ -1166,7 +1194,6 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                     pdf_title_main = "Combined Visuals Report" if is_complaints_subset_displayed else "General Visuals Report"
                     html_content += f"<h1>{pdf_title_main}</h1><h2>Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}</h2>"
                     
-                    # Define order: General charts first, then potential subset complaint charts
                     general_chart_order = ["Branch_Issues", "Area_Manager", "Report_Type", "Category", "Shift_Values", "Trend"]
                     subset_complaint_chart_order = [f"Subset_{key}" for key in ["Complaint_Type", "Product_Complained_About", "Quality_Issue_Detail", "Order_Error_Detail", "Complaints_by_Branch", "Complaints_Trend"]]
                     
@@ -1246,7 +1273,6 @@ else:
 
 if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
     st.sidebar.markdown("Comparison Period Data (CSV):")
-    # Use df_comp1_all and df_comp2_all for CSV downloads as they contain the full data for the periods
     if 'df_comp1_all' in locals() and not df_comp1_all.empty:
         try:
             csv_c1 = df_comp1_all.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
