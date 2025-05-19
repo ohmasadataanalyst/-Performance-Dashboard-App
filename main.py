@@ -14,7 +14,7 @@ import re # For parsing complaint details
 # Streamlit config MUST BE THE FIRST STREAMLIT COMMAND
 st.set_page_config(page_title="Performance Dashboard", layout="wide")
 
-# --- Branch Code to Standardized Name Mapping (RE-INTRODUCED) ---
+# --- Branch Code to Standardized Name Mapping ---
 BRANCH_SCHEMA = {
     "B01": "NURUH B01", "B02": "KHRUH B02", "B03": "GHRUH B03", "B04": "NSRUH B04",
     "B05": "RAWRUH B05", "B06": "DARUH B06", "B07": "LBRUH B07", "B08": "SWRUH B08",
@@ -34,6 +34,8 @@ DB_PATH = 'issues.db'
 conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
 c = conn.cursor()
 
+# Create tables if they don't exist
+# ... (database setup code remains unchanged) ...
 c.execute('''CREATE TABLE IF NOT EXISTS uploads (
     id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, uploader TEXT, timestamp TEXT,
     file_type TEXT, category TEXT,
@@ -73,6 +75,9 @@ except sqlite3.OperationalError as e:
     if "duplicate column name" not in str(e).lower() and 'db_critical_error_msg' not in st.session_state :
         st.session_state.db_critical_error_msg = f"Failed to update 'issues' table schema: {e}"
 
+
+# --- User Management & Configs ---
+# ... (user management and category_file_types remain unchanged) ...
 db_admin = {
     "abdalziz alsalem": b"$2b$12$VzSUGELJcT7DaBWoGuJi8OLK7mvpLxRumSduEte8MDAPkOnuXMdnW",
     "omar salah": b"$2b$12$9VB3YRZRVe2RLxjO8FD3C.01ecj1cEShMAZGYbFCE3JdGagfaWomy",
@@ -91,7 +96,6 @@ category_file_types = {
     'meal training': ['performance', 'missing types']
 }
 all_categories = list(category_file_types.keys())
-
 MULTI_VALUE_COMPLAINT_COLS = ['Complaint Type', 'Quality Issue Detail', 'Order Error Detail']
 
 
@@ -104,6 +108,8 @@ if 'db_schema_updated_flag_issues' in st.session_state and st.session_state.db_s
 
 LOGO_PATH = "company_logo.png"
 
+# --- Login and Basic Layout ---
+# ... (check_login, main app layout, user display, logout remain unchanged) ...
 def check_login():
     if 'authenticated' not in st.session_state:
         st.session_state.authenticated = False; st.session_state.user_name = None; st.session_state.user_role = None
@@ -151,6 +157,9 @@ if st.sidebar.button("Logout", key="logout_button_main"):
 is_admin = st.session_state.get('user_role') == 'admin'
 current_user = st.session_state.get('user_name', 'Unknown User')
 
+
+# --- PDF Generation Utility ---
+# ... (generate_pdf remains unchanged) ...
 def generate_pdf(html, wk_path=None):
     if not wk_path or wk_path == "not found":
         st.error("wkhtmltopdf path not set in sidebar. PDF generation failed.")
@@ -174,6 +183,8 @@ def generate_pdf(html, wk_path=None):
 
 st.sidebar.header("🔍 Filters & Options")
 
+# --- Admin Controls ---
+# ... (admin controls section remains unchanged) ...
 if is_admin:
     st.sidebar.subheader("Admin Controls")
     st.sidebar.markdown("Set parameters, select Excel, specify import date range, then upload.")
@@ -425,11 +436,11 @@ if is_admin:
     else:
         st.sidebar.warning(f"'{DB_PATH}' not found. Cannot offer download.")
 
-
+# --- Data Loading & Main Dashboard Filters ---
+# ... (Data loading and filter setup code remains unchanged) ...
 default_wk = shutil.which('wkhtmltopdf') or 'not found'
 wk_path = st.sidebar.text_input("wkhtmltopdf path (for PDF reports):", default_wk, help="Required for PDF generation.")
 
-# --- Data Loading & Filtering for Dashboard ---
 df_uploads_raw_main = pd.read_sql('SELECT id, filename, uploader, timestamp, file_type, category, submission_date FROM uploads ORDER BY submission_date DESC, timestamp DESC', conn)
 def format_display_date(d): return datetime.strptime(str(d),'%Y-%m-%d').strftime('%Y-%m-%d') if pd.notna(d) and str(d) else "N/A"
 df_uploads_raw_main['display_submission_date_fmt'] = df_uploads_raw_main['submission_date'].apply(format_display_date)
@@ -521,10 +532,12 @@ else:
 st.subheader(f"Filtered Data for Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}")
 st.write(f"Total records found in primary period: {len(df_primary_period)}")
 
-# --- Charting Functions (Generic) ---
+# --- Charting Functions ---
+# ... (create_pie_chart and parse_complaint_details remain unchanged) ...
+# ... create_bar_chart now has 'sort_ascending' and 'sort_values_by'
 COMPLAINTS_COLOR_SEQUENCE = px.colors.qualitative.Vivid
 
-def create_bar_chart(df_source, group_col, title_suffix="", chart_title=None, color_sequence=None, barmode='group'):
+def create_bar_chart(df_source, group_col, title_suffix="", chart_title=None, color_sequence=None, barmode='group', sort_ascending=False, sort_values_by='count'):
     final_title = chart_title if chart_title else f"Issues by {group_col.replace('_',' ').title()} {title_suffix}"
     if group_col not in df_source.columns or df_source.empty:
         return None
@@ -538,14 +551,17 @@ def create_bar_chart(df_source, group_col, title_suffix="", chart_title=None, co
 
 
     if not df_valid_data.empty:
-        # Check if 'period_label' exists for comparison charts
-        if 'period_label' in df_valid_data.columns:
+        if 'period_label' in df_valid_data.columns: # For comparison charts
             data = df_valid_data.groupby([group_col, 'period_label']).size().reset_index(name='count')
+            # Sorting for comparison charts is trickier if we want overall sort by one period's count
+            # For now, let's sort by the group_col alphabetically for grouped charts
+            data = data.sort_values(by=[group_col, 'period_label'], ascending=[True, True])
             if not data.empty:
                 return px.bar(data, x=group_col, y='count', color='period_label', barmode=barmode, title=final_title, template="plotly_white",
                               color_discrete_sequence=color_sequence if color_sequence else px.colors.qualitative.Plotly)
         else: # For single period charts
-            data = df_valid_data.groupby(group_col).size().reset_index(name='count').sort_values('count', ascending=False)
+            data = df_valid_data.groupby(group_col).size().reset_index(name='count')
+            data = data.sort_values(by=sort_values_by, ascending=sort_ascending)
             if not data.empty:
                 return px.bar(data, x=group_col, y='count', title=final_title, template="plotly_white",
                               color_discrete_sequence=color_sequence if color_sequence else px.colors.qualitative.Plotly)
@@ -591,6 +607,7 @@ def parse_complaint_details(issue_string):
     return pd.Series(details)
 
 # --- DASHBOARD DISPLAY FUNCTIONS ---
+# ... (display_general_dashboard remains largely unchanged) ...
 def display_general_dashboard(df_data, figs_container):
     if df_data.empty:
         st.info("No data available for general performance analysis with current filters.")
@@ -598,20 +615,20 @@ def display_general_dashboard(df_data, figs_container):
 
     chart_cols = st.columns(2)
     with chart_cols[0]:
-        figs_container['Branch'] = create_bar_chart(df_data, 'branch', '(Primary)')
-        if figs_container['Branch']: st.plotly_chart(figs_container['Branch'], use_container_width=True)
+        figs_container['Branch_Issues'] = create_bar_chart(df_data, 'branch', '(Primary)') # Renamed key for clarity
+        if figs_container['Branch_Issues']: st.plotly_chart(figs_container['Branch_Issues'], use_container_width=True)
         else: st.caption("No data for Branch chart.")
 
         df_report_type_viz = df_data.copy()
         if 'upload_category' in df_report_type_viz.columns and 'report_type' in df_report_type_viz.columns:
             condition = (df_report_type_viz['report_type'] == 'issues') & (df_report_type_viz['upload_category'] == 'CCTV')
             df_report_type_viz.loc[condition, 'report_type'] = 'CCTV issues'
-        figs_container['Report Type'] = create_bar_chart(df_report_type_viz, 'report_type', '(Primary)')
-        if figs_container['Report Type']: st.plotly_chart(figs_container['Report Type'], use_container_width=True)
+        figs_container['Report_Type'] = create_bar_chart(df_report_type_viz, 'report_type', '(Primary)')
+        if figs_container['Report_Type']: st.plotly_chart(figs_container['Report_Type'], use_container_width=True)
         else: st.caption("No data for Report Type chart.")
     with chart_cols[1]:
-        figs_container['Area Manager'] = create_pie_chart(df_data, 'area_manager', '(Primary)')
-        if figs_container['Area Manager']: st.plotly_chart(figs_container['Area Manager'], use_container_width=True)
+        figs_container['Area_Manager'] = create_pie_chart(df_data, 'area_manager', '(Primary)')
+        if figs_container['Area_Manager']: st.plotly_chart(figs_container['Area_Manager'], use_container_width=True)
         else: st.caption("No data for Area Manager chart.")
         figs_container['Category'] = create_bar_chart(df_data, 'upload_category', '(Primary)')
         if figs_container['Category']: st.plotly_chart(figs_container['Category'], use_container_width=True)
@@ -663,7 +680,7 @@ def display_general_dashboard(df_data, figs_container):
     else: st.info("Issue descriptions column ('issues') not available or empty.")
 
 
-def display_complaints_performance_dashboard(df_complaints_raw):
+def display_complaints_performance_dashboard(df_complaints_raw, figs_container): # Added figs_container
     if df_complaints_raw.empty:
         st.info("No complaints data available for performance analysis with current filters.")
         return
@@ -696,8 +713,8 @@ def display_complaints_performance_dashboard(df_complaints_raw):
     with col1:
         df_type_chart_data = df_complaints.explode('Complaint Type').dropna(subset=['Complaint Type'])
         df_type_chart_data = df_type_chart_data[df_type_chart_data['Complaint Type'] != '']
-        fig_type = create_bar_chart(df_type_chart_data, 'Complaint Type', chart_title="Complaints by Type", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
-        if fig_type: st.plotly_chart(fig_type, use_container_width=True)
+        figs_container['Complaint_Type'] = create_bar_chart(df_type_chart_data, 'Complaint Type', chart_title="Complaints by Type", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
+        if figs_container['Complaint_Type']: st.plotly_chart(figs_container['Complaint_Type'], use_container_width=True)
         else: st.caption("No data for Complaint Type chart.")
 
         df_product_chart_source = df_complaints[
@@ -706,8 +723,8 @@ def display_complaints_performance_dashboard(df_complaints_raw):
             (df_complaints['Product Complained About'].str.lower() != 'لا علاقة لها بالمنتج')
         ].copy()
         if not df_product_chart_source.empty:
-            fig_product = create_bar_chart(df_product_chart_source, 'Product Complained About', chart_title="Complaints by Product (Specific Products)", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
-            if fig_product: st.plotly_chart(fig_product, use_container_width=True)
+            figs_container['Product_Complained_About'] = create_bar_chart(df_product_chart_source, 'Product Complained About', chart_title="Complaints by Product (Specific Products)", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
+            if figs_container['Product_Complained_About']: st.plotly_chart(figs_container['Product_Complained_About'], use_container_width=True)
             else: st.caption("No data for Product chart (after filtering 'لا علاقة لها بالمنتج').")
         else:
             st.info("No complaints related to specific products to display (excluding 'لا علاقة لها بالمنتج').")
@@ -720,8 +737,8 @@ def display_complaints_performance_dashboard(df_complaints_raw):
         if not df_quality_issues_source.empty:
             df_quality_detail_chart_data = df_quality_issues_source.explode('Quality Issue Detail').dropna(subset=['Quality Issue Detail'])
             df_quality_detail_chart_data = df_quality_detail_chart_data[df_quality_detail_chart_data['Quality Issue Detail'] != '']
-            fig_quality_detail = create_bar_chart(df_quality_detail_chart_data, 'Quality Issue Detail', chart_title="Quality Issue Details (for 'جوده' complaints)", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
-            if fig_quality_detail: st.plotly_chart(fig_quality_detail, use_container_width=True)
+            figs_container['Quality_Issue_Detail'] = create_bar_chart(df_quality_detail_chart_data, 'Quality Issue Detail', chart_title="Quality Issue Details (for 'جوده' complaints)", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
+            if figs_container['Quality_Issue_Detail']: st.plotly_chart(figs_container['Quality_Issue_Detail'], use_container_width=True)
             else: st.caption("No specific quality details found for 'جوده' complaints.")
         else:
             st.caption("No 'جوده' (Quality) type complaints to detail.")
@@ -733,15 +750,15 @@ def display_complaints_performance_dashboard(df_complaints_raw):
         if not df_order_errors_source.empty:
             df_order_error_detail_chart_data = df_order_errors_source.explode('Order Error Detail').dropna(subset=['Order Error Detail'])
             df_order_error_detail_chart_data = df_order_error_detail_chart_data[df_order_error_detail_chart_data['Order Error Detail'] != '']
-            fig_order_error_detail = create_bar_chart(df_order_error_detail_chart_data, 'Order Error Detail', chart_title="Order Error Details (for 'خطاء فى الطلب' complaints)", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
-            if fig_order_error_detail: st.plotly_chart(fig_order_error_detail, use_container_width=True)
+            figs_container['Order_Error_Detail'] = create_bar_chart(df_order_error_detail_chart_data, 'Order Error Detail', chart_title="Order Error Details (for 'خطاء فى الطلب' complaints)", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
+            if figs_container['Order_Error_Detail']: st.plotly_chart(figs_container['Order_Error_Detail'], use_container_width=True)
             else: st.caption("No specific order error details found for 'خطاء فى الطلب' complaints.")
         else:
             st.caption("No 'خطاء فى الطلب' (Order Error) type complaints to detail.")
 
     st.subheader("Complaints by Branch")
-    fig_branch_complaints = create_bar_chart(df_complaints, 'branch', chart_title="Total Complaints per Branch", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
-    if fig_branch_complaints: st.plotly_chart(fig_branch_complaints, use_container_width=True)
+    figs_container['Complaints_by_Branch'] = create_bar_chart(df_complaints, 'branch', chart_title="Total Complaints per Branch", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
+    if figs_container['Complaints_by_Branch']: st.plotly_chart(figs_container['Complaints_by_Branch'], use_container_width=True)
     else: st.caption("No data for Complaints by Branch chart.")
 
     if 'date' in df_complaints.columns and pd.api.types.is_datetime64_any_dtype(df_complaints['date']) and not df_complaints['date'].isnull().all():
@@ -751,7 +768,8 @@ def display_complaints_performance_dashboard(df_complaints_raw):
         if not trend_data_complaints.empty:
             fig_complaints_trend = px.line(trend_data_complaints, x='date', y='daily_complaints', title='Daily Complaints Trend', markers=True, color_discrete_sequence=COMPLAINTS_COLOR_SEQUENCE)
             fig_complaints_trend.update_layout(template="plotly_white")
-            st.plotly_chart(fig_complaints_trend, use_container_width=True)
+            figs_container['Complaints_Trend'] = fig_complaints_trend # Store for PDF
+            st.plotly_chart(figs_container['Complaints_Trend'], use_container_width=True)
         else: st.caption("No data for daily complaints trend.")
 
     st.subheader("Detailed Complaints Data (Primary Period - Parsed)")
@@ -767,9 +785,9 @@ def display_complaints_performance_dashboard(df_complaints_raw):
             df_display_complaints[col] = df_display_complaints[col].apply(lambda x: ', '.join(x) if isinstance(x, list) and x else (x if not isinstance(x,list) else ''))
     st.dataframe(df_display_complaints.reset_index(drop=True), use_container_width=True)
 
-
 # --- Main Dashboard Logic ---
 figs_primary = {}
+figs_complaints_primary = {} # For complaints-specific visuals
 
 if not df_primary_period.empty:
     is_purely_complaints_perf = (
@@ -781,7 +799,7 @@ if not df_primary_period.empty:
 
     if is_purely_complaints_perf:
         st.subheader("Complaints Performance Dashboard (Primary Period)")
-        display_complaints_performance_dashboard(df_primary_period.copy())
+        display_complaints_performance_dashboard(df_primary_period.copy(), figs_complaints_primary)
     else:
         st.subheader("General Performance Analysis (Primary Period)")
         display_general_dashboard(df_primary_period.copy(), figs_primary)
@@ -794,12 +812,51 @@ if not df_primary_period.empty:
         if not df_complaints_subset_in_primary.empty:
             st.markdown("---")
             st.subheader("Complaints Analysis (Subset of Primary Period)")
-            display_complaints_performance_dashboard(df_complaints_subset_in_primary)
+            # For subset, visuals are displayed but not separately saved for PDF in this path
+            temp_figs_subset_complaints = {}
+            display_complaints_performance_dashboard(df_complaints_subset_in_primary, temp_figs_subset_complaints)
+
+    # --- Branch Ranking Section ---
+    st.markdown("---")
+    if st.button("🏆 Show Branch Rankings (Current Filters)", key="show_rankings_button"):
+        if not df_primary_period.empty and 'branch' in df_primary_period.columns:
+            st.subheader(f"Branch Performance Ranking (Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d})")
+            st.markdown("_Based on total count of issues/complaints with current filters. Lower count is better._")
+            
+            branch_counts = df_primary_period.groupby('branch').size().reset_index(name='Total Issues/Complaints')
+            branch_counts = branch_counts.sort_values(by='Total Issues/Complaints', ascending=True)
+            branch_counts['Rank'] = branch_counts['Total Issues/Complaints'].rank(method='min', ascending=True).astype(int)
+            
+            # Reorder columns for display
+            branch_counts = branch_counts[['Rank', 'branch', 'Total Issues/Complaints']]
+            
+            st.dataframe(branch_counts.reset_index(drop=True), use_container_width=True)
+
+            # Optional: Chart of top/bottom N
+            if len(branch_counts) > 1:
+                rank_chart_cols = st.columns(2)
+                with rank_chart_cols[0]:
+                    top_n = min(10, len(branch_counts))
+                    fig_top_ranked = create_bar_chart(branch_counts.head(top_n), 'branch', 
+                                                      chart_title=f"Top {top_n} Ranked Branches (Best Performance)",
+                                                      sort_ascending=True, sort_values_by='Total Issues/Complaints')
+                    if fig_top_ranked: st.plotly_chart(fig_top_ranked, use_container_width=True)
+                
+                with rank_chart_cols[1]:
+                    bottom_n = min(10, len(branch_counts))
+                    fig_bottom_ranked = create_bar_chart(branch_counts.tail(bottom_n), 'branch', 
+                                                         chart_title=f"Bottom {bottom_n} Ranked Branches (Needs Improvement)",
+                                                         sort_ascending=False, sort_values_by='Total Issues/Complaints') # Sorts by count descending
+                    if fig_bottom_ranked: st.plotly_chart(fig_bottom_ranked, use_container_width=True)
+        else:
+            st.info("No data or branch information available to generate rankings with current filters.")
+
 else:
     st.info("No data matches the current filter criteria for the primary period.")
 
 
 # --- Period Comparison Logic ---
+# ... (Period comparison logic remains largely unchanged, but uses updated create_bar_chart) ...
 df_comp1, df_comp2 = pd.DataFrame(), pd.DataFrame()
 if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
     st.markdown("---"); st.header("📊 Period Comparison Results (Based on Issue Dates)")
@@ -823,7 +880,6 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
         if is_comp_complaints_data_p1 and is_comp_complaints_data_p2 :
             st.subheader("Complaints Performance Comparison")
             
-            # Parse and sanitize data for both periods
             parsed_details_p1 = df_comp1['issues'].apply(parse_complaint_details)
             df_comp1_parsed = pd.concat([df_comp1.reset_index(drop=True).drop(columns=['issues'], errors='ignore'), parsed_details_p1.reset_index(drop=True)], axis=1)
             df_comp1_parsed.rename(columns={'Type': 'Complaint Type', 'Product': 'Product Complained About', 'Quality Detail': 'Quality Issue Detail', 'Order Error': 'Order Error Detail'}, inplace=True)
@@ -851,7 +907,6 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
             df_combined_complaints_comp = pd.concat([df_comp1_parsed, df_comp2_parsed], ignore_index=True)
 
             if not df_combined_complaints_comp.empty:
-                # --- Total Complaints Count Comparison ---
                 st.markdown("##### Total Complaint Counts by Period")
                 total_complaints_p1 = len(df_comp1_parsed)
                 total_complaints_p2 = len(df_comp2_parsed)
@@ -865,8 +920,6 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                               delta=f"{delta_total_complaints:+}" if delta_total_complaints !=0 else None)
                 st.markdown("---")
 
-
-                # --- Complaint Type Comparison ---
                 comp_cols1, comp_cols2 = st.columns(2)
                 with comp_cols1:
                     df_type_comp_exploded = df_combined_complaints_comp.explode('Complaint Type').dropna(subset=['Complaint Type'])
@@ -878,8 +931,6 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                         if fig_type_comp: st.plotly_chart(fig_type_comp, use_container_width=True)
                         else: st.caption("No data for Complaint Type comparison chart.")
                     else: st.caption("No valid complaint types for comparison.")
-
-                # --- Product Complained About Comparison ---
                 with comp_cols2:
                     df_product_comp_source = df_combined_complaints_comp[
                         df_combined_complaints_comp['Product Complained About'].notna() & \
@@ -893,16 +944,12 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                         if fig_product_comp: st.plotly_chart(fig_product_comp, use_container_width=True)
                         else: st.caption("No data for Product comparison chart.")
                     else: st.info("No specific product complaints for comparison.")
-                
                 st.markdown("---")
                 comp_cols3, comp_cols4 = st.columns(2)
-
-                # --- Quality Issue Detail Comparison ---
                 with comp_cols3:
                     df_exploded_types_comp_q = df_combined_complaints_comp.explode('Complaint Type').dropna(subset=['Complaint Type'])
                     df_exploded_types_comp_q = df_exploded_types_comp_q[df_exploded_types_comp_q['Complaint Type'] != '']
                     df_quality_comp_source = df_exploded_types_comp_q[df_exploded_types_comp_q['Complaint Type'] == 'جوده'].copy()
-
                     if not df_quality_comp_source.empty:
                         df_quality_detail_comp_data = df_quality_comp_source.explode('Quality Issue Detail').dropna(subset=['Quality Issue Detail'])
                         df_quality_detail_comp_data = df_quality_detail_comp_data[df_quality_detail_comp_data['Quality Issue Detail'] != '']
@@ -914,13 +961,10 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                             else: st.caption("No specific quality details for 'جوده' comparison.")
                         else: st.caption("No specific quality details for 'جوده' comparison after explode.")
                     else: st.caption("No 'جوده' type complaints for quality detail comparison.")
-
-                # --- Order Error Detail Comparison ---
                 with comp_cols4:
                     df_exploded_types_comp_oe = df_combined_complaints_comp.explode('Complaint Type').dropna(subset=['Complaint Type'])
                     df_exploded_types_comp_oe = df_exploded_types_comp_oe[df_exploded_types_comp_oe['Complaint Type'] != '']
                     df_order_error_comp_source = df_exploded_types_comp_oe[df_exploded_types_comp_oe['Complaint Type'] == 'خطاء فى الطلب'].copy()
-
                     if not df_order_error_comp_source.empty:
                         df_order_error_detail_comp_data = df_order_error_comp_source.explode('Order Error Detail').dropna(subset=['Order Error Detail'])
                         df_order_error_detail_comp_data = df_order_error_detail_comp_data[df_order_error_detail_comp_data['Order Error Detail'] != '']
@@ -932,9 +976,7 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                             else: st.caption("No specific order error details for 'خطاء فى الطلب' comparison.")
                         else: st.caption("No specific order error details for 'خطاء فى الطلب' comparison after explode.")
                     else: st.caption("No 'خطاء فى الطلب' type complaints for order error detail comparison.")
-                
                 st.markdown("---")
-                # --- Complaints by Branch Comparison ---
                 if 'branch' in df_combined_complaints_comp.columns:
                     fig_branch_complaints_comp = create_bar_chart(df_combined_complaints_comp, 'branch',
                                                                 chart_title="Total Complaints per Branch Comparison",
@@ -944,7 +986,7 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
             else:
                 st.caption("No combined complaints data for comparison.")
         
-        else: # General comparison
+        else: 
             st.subheader("Overall Issue Counts")
             col_summary1, col_summary2 = st.columns(2)
             col_summary1.metric(label=f"Total Issues ({p1_label})", value=f"{len(df_comp1)}")
@@ -987,7 +1029,7 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                 if not df_combined_branch.empty and 'branch' in df_combined_branch.columns:
                     fig_branch_comp = create_bar_chart(df_combined_branch, 'branch',
                                                      chart_title='Issues by Branch Comparison',
-                                                     color_sequence=px.colors.qualitative.Plotly) # Default colors for general
+                                                     color_sequence=px.colors.qualitative.Plotly)
                     if fig_branch_comp: st.plotly_chart(fig_branch_comp, use_container_width=True)
                     else: st.caption("No branch data for issue comparison chart.")
 
@@ -1013,9 +1055,9 @@ elif enable_comparison:
 
 # --- Downloads Section ---
 st.sidebar.subheader("Downloads")
-is_primary_data_purely_complaints = False
+is_primary_data_purely_complaints_check = False # Use a different variable name to avoid conflict
 if 'df_primary_period' in locals() and not df_primary_period.empty:
-    is_primary_data_purely_complaints = (
+    is_primary_data_purely_complaints_check = (
         (df_primary_period['upload_category'] == 'complaints').all() and
         (df_primary_period['report_type'] == 'performance').all() and
         df_primary_period['upload_category'].nunique() == 1 and
@@ -1031,7 +1073,7 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
     try:
         output_excel = io.BytesIO()
         df_primary_excel_export = df_primary_period.copy()
-        if is_primary_data_purely_complaints:
+        if is_primary_data_purely_complaints_check:
             parsed_details_excel = df_primary_excel_export['issues'].apply(parse_complaint_details)
             df_primary_excel_export = pd.concat([df_primary_excel_export.reset_index(drop=True).drop(columns=['issues'], errors='ignore'), parsed_details_excel.reset_index(drop=True)], axis=1)
             df_primary_excel_export.rename(columns={'Type': 'Complaint Type', 'Product': 'Product Complained About', 'Quality Detail': 'Quality Issue Detail', 'Order Error': 'Order Error Detail'}, inplace=True)
@@ -1054,15 +1096,16 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
         st.sidebar.download_button(label="Download Primary (Excel)", data=excel_data, file_name=f"primary_data_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_primary_xlsx")
     except Exception as e: st.sidebar.error(f"Primary Excel Error: {e}")
 
-    if not is_primary_data_purely_complaints:
-        if st.sidebar.button("Prepare Visuals PDF (Primary)", key="prep_visuals_pdf_primary"):
+    # PDF Visuals Section
+    if not is_primary_data_purely_complaints_check: # General Dashboard Visuals
+        if st.sidebar.button("Prepare General Visuals PDF (Primary)", key="prep_visuals_pdf_primary"):
             if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set for PDF generation.")
-            elif not figs_primary or not any(figs_primary.values()): st.sidebar.warning("No visuals generated for the primary period (general dashboard).")
+            elif not figs_primary or not any(figs_primary.values()): st.sidebar.warning("No general visuals generated for the primary period.")
             else:
-                with st.spinner("Generating Visuals PDF for Primary Period..."):
-                    html_content = f"<html><head><meta charset='utf-8'><title>Visuals Report (Primary)</title><style>body{{font-family: Arial, sans-serif; margin: 20px;}} h1,h2{{text-align:center; color: #333; page-break-after: avoid;}} img{{display:block;margin-left:auto;margin-right:auto;max-width:650px;height:auto;border:1px solid #ccc;padding:5px;margin-bottom:25px; page-break-inside: avoid;}} @media print {{* {{-webkit-print-color-adjust:exact !important; color-adjust:exact !important; print-color-adjust:exact !important;}} body {{ background-color:white !important;}} }}</style></head><body>"
-                    html_content += f"<h1>Visuals Report</h1><h2>Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}</h2>"
-                    chart_titles_in_order = ["Branch", "Area Manager", "Report Type", "Category", "Shift_Values", "Trend"]
+                with st.spinner("Generating General Visuals PDF for Primary Period..."):
+                    html_content = f"<html><head><meta charset='utf-8'><title>General Visuals Report (Primary)</title><style>body{{font-family: Arial, sans-serif; margin: 20px;}} h1,h2{{text-align:center; color: #333; page-break-after: avoid;}} img{{display:block;margin-left:auto;margin-right:auto;max-width:650px;height:auto;border:1px solid #ccc;padding:5px;margin-bottom:25px; page-break-inside: avoid;}} @media print {{* {{-webkit-print-color-adjust:exact !important; color-adjust:exact !important; print-color-adjust:exact !important;}} body {{ background-color:white !important;}} }}</style></head><body>"
+                    html_content += f"<h1>General Visuals Report</h1><h2>Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}</h2>"
+                    chart_titles_in_order = ["Branch_Issues", "Area_Manager", "Report_Type", "Category", "Shift_Values", "Trend"] # Updated key "Branch" to "Branch_Issues"
                     for title_key in chart_titles_in_order:
                         if figs_primary.get(title_key) and figs_primary[title_key] is not None:
                             fig_obj = figs_primary[title_key]
@@ -1076,11 +1119,45 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                     pdf_bytes_visuals = generate_pdf(html_content, wk_path=wk_path)
                     if pdf_bytes_visuals:
                         st.session_state.pdf_visuals_primary_data = pdf_bytes_visuals
-                        st.sidebar.success("Visuals PDF (Primary) ready for download.")
+                        st.sidebar.success("General Visuals PDF (Primary) ready for download.")
                     else:
                         if 'pdf_visuals_primary_data' in st.session_state: del st.session_state.pdf_visuals_primary_data
         if 'pdf_visuals_primary_data' in st.session_state and st.session_state.pdf_visuals_primary_data:
-            st.sidebar.download_button(label="Download Visuals PDF (Primary)", data=st.session_state.pdf_visuals_primary_data, file_name=f"visuals_report_primary_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.pdf", mime="application/pdf", key="action_dl_visuals_pdf_primary", on_click=lambda: st.session_state.pop('pdf_visuals_primary_data', None))
+            st.sidebar.download_button(label="Download General Visuals PDF (Primary)", data=st.session_state.pdf_visuals_primary_data, file_name=f"general_visuals_report_primary_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.pdf", mime="application/pdf", key="action_dl_visuals_pdf_primary", on_click=lambda: st.session_state.pop('pdf_visuals_primary_data', None))
+    
+    elif is_primary_data_purely_complaints_check: # Complaints Dashboard Visuals
+        if st.sidebar.button("Prepare Complaints Visuals PDF (Primary)", key="prep_complaints_visuals_pdf_primary"):
+            if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set for PDF generation.")
+            elif not figs_complaints_primary or not any(figs_complaints_primary.values()): st.sidebar.warning("No complaints visuals generated for the primary period.")
+            else:
+                with st.spinner("Generating Complaints Visuals PDF for Primary Period..."):
+                    html_content = f"<html><head><meta charset='utf-8'><title>Complaints Visuals Report (Primary)</title><style>body{{font-family: Arial, sans-serif; margin: 20px;}} h1,h2{{text-align:center; color: #333; page-break-after: avoid;}} img{{display:block;margin-left:auto;margin-right:auto;max-width:650px;height:auto;border:1px solid #ccc;padding:5px;margin-bottom:25px; page-break-inside: avoid;}} @media print {{* {{-webkit-print-color-adjust:exact !important; color-adjust:exact !important; print-color-adjust:exact !important;}} body {{ background-color:white !important;}} }}</style></head><body>"
+                    html_content += f"<h1>Complaints Visuals Report</h1><h2>Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}</h2>"
+                    # Define the order of complaint charts for the PDF
+                    complaint_chart_titles_in_order = [
+                        "Complaint_Type", "Product_Complained_About", 
+                        "Quality_Issue_Detail", "Order_Error_Detail",
+                        "Complaints_by_Branch", "Complaints_Trend"
+                    ]
+                    for title_key in complaint_chart_titles_in_order:
+                        if figs_complaints_primary.get(title_key) and figs_complaints_primary[title_key] is not None:
+                            fig_obj = figs_complaints_primary[title_key]
+                            try:
+                                img_bytes = fig_obj.to_image(format='png', engine='kaleido', scale=1.2, width=700, height=450)
+                                b64_img = base64.b64encode(img_bytes).decode()
+                                actual_chart_title = fig_obj.layout.title.text if hasattr(fig_obj, 'layout') and fig_obj.layout.title and hasattr(fig_obj.layout.title, 'text') else title_key.replace("_", " ")
+                                html_content += f"<h2>{actual_chart_title}</h2><img src='data:image/png;base64,{b64_img}' alt='{actual_chart_title}'/>"
+                            except Exception as e_img: st.sidebar.error(f"Error generating image for '{title_key}': {e_img}")
+                    html_content += "</body></html>"
+                    pdf_bytes_complaints_visuals = generate_pdf(html_content, wk_path=wk_path)
+                    if pdf_bytes_complaints_visuals:
+                        st.session_state.pdf_complaints_visuals_primary_data = pdf_bytes_complaints_visuals
+                        st.sidebar.success("Complaints Visuals PDF (Primary) ready for download.")
+                    else:
+                        if 'pdf_complaints_visuals_primary_data' in st.session_state: del st.session_state.pdf_complaints_visuals_primary_data
+        if 'pdf_complaints_visuals_primary_data' in st.session_state and st.session_state.pdf_complaints_visuals_primary_data:
+            st.sidebar.download_button(label="Download Complaints Visuals PDF (Primary)", data=st.session_state.pdf_complaints_visuals_primary_data, file_name=f"complaints_visuals_report_primary_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.pdf", mime="application/pdf", key="action_dl_complaints_visuals_pdf_primary", on_click=lambda: st.session_state.pop('pdf_complaints_visuals_primary_data', None))
+
 
     if st.sidebar.button("Prepare Data Table PDF (Primary)", key="prep_dashboard_pdf_primary"):
         if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set for PDF generation.")
@@ -1088,7 +1165,7 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
             with st.spinner("Generating Data Table PDF for Primary Period..."):
                 df_pdf_view_final = df_primary_period.copy()
                 pdf_title_suffix = "Data"
-                if is_primary_data_purely_complaints:
+                if is_primary_data_purely_complaints_check:
                     pdf_title_suffix = "Complaints Data"
                     parsed_details_pdf = df_pdf_view_final['issues'].apply(parse_complaint_details)
                     df_pdf_view_final = pd.concat([df_pdf_view_final.reset_index(drop=True).drop(columns=['issues'], errors='ignore'), parsed_details_pdf.reset_index(drop=True)], axis=1)
@@ -1129,8 +1206,8 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                 else:
                     if 'pdf_dashboard_primary_data' in st.session_state: del st.session_state.pdf_dashboard_primary_data
     if 'pdf_dashboard_primary_data' in st.session_state and st.session_state.pdf_dashboard_primary_data:
-        pdf_dl_filename_suffix = "complaints_table" if is_primary_data_purely_complaints else "data_table"
-        st.sidebar.download_button(label=f"Download {'Complaints' if is_primary_data_purely_complaints else 'Data'} Table PDF (Primary)", data=st.session_state.pdf_dashboard_primary_data, file_name=f"{pdf_dl_filename_suffix}_report_primary_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.pdf", mime="application/pdf", key="action_dl_dashboard_pdf_primary", on_click=lambda: st.session_state.pop('pdf_dashboard_primary_data', None))
+        pdf_dl_filename_suffix = "complaints_table" if is_primary_data_purely_complaints_check else "data_table"
+        st.sidebar.download_button(label=f"Download {'Complaints' if is_primary_data_purely_complaints_check else 'Data'} Table PDF (Primary)", data=st.session_state.pdf_dashboard_primary_data, file_name=f"{pdf_dl_filename_suffix}_report_primary_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.pdf", mime="application/pdf", key="action_dl_dashboard_pdf_primary", on_click=lambda: st.session_state.pop('pdf_dashboard_primary_data', None))
 else:
     st.sidebar.info("No primary period data to download.")
 
