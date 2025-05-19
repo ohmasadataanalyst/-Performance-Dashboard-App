@@ -538,18 +538,26 @@ def create_bar_chart(df_source, group_col, title_suffix="", chart_title=None, co
     if not df_valid_data.empty:
         if 'period_label' in df_valid_data.columns:
             data = df_valid_data.groupby([group_col, 'period_label']).size().reset_index(name='count')
+            # For grouped bar charts, sort by the group_col primarily to keep categories together, then by period_label
             data = data.sort_values(by=[group_col, 'period_label'], ascending=[True, True])
             if not data.empty:
                 return px.bar(data, x=group_col, y='count', color='period_label', barmode=barmode, title=final_title, template="plotly_white",
                               color_discrete_sequence=color_sequence if color_sequence else px.colors.qualitative.Plotly)
         else:
+            # For single period charts (e.g., ranking)
+            # If df_source is already grouped and has the sort_values_by col (like 'Total Issues/Complaints' from ranking)
+            if sort_values_by in df_source.columns and group_col in df_source.columns : # direct use for pre-aggregated, pre-sorted data
+                 data_to_plot = df_source.copy()
+                 # Ensure the x-axis (group_col) is treated as categorical for correct order
+                 data_to_plot[group_col] = data_to_plot[group_col].astype(str)
+                 fig = px.bar(data_to_plot, x=group_col, y=sort_values_by, title=final_title, template="plotly_white",
+                               color_discrete_sequence=color_sequence if color_sequence else px.colors.qualitative.Plotly)
+                 fig.update_xaxes(categoryorder='array', categoryarray=data_to_plot[group_col].tolist()) # Preserve sort order
+                 return fig
+
+            # If df_source is raw and needs grouping
             data = df_valid_data.groupby(group_col).size().reset_index(name='count')
-            # For ranking and other single-period charts, use the provided sort_values_by
-            if sort_values_by in data.columns: # Check if the sort_values_by column exists in the grouped data
-                 data = data.sort_values(by=sort_values_by, ascending=sort_ascending)
-            elif 'count' in data.columns: # Fallback to 'count' if custom sort_values_by isn't there
-                 data = data.sort_values(by='count', ascending=sort_ascending)
-            # If neither, data remains unsorted by value but might be alphabetically sorted by group_col from groupby
+            data = data.sort_values(by='count', ascending=sort_ascending)
 
             if not data.empty:
                 return px.bar(data, x=group_col, y='count', title=final_title, template="plotly_white",
@@ -598,12 +606,12 @@ def parse_complaint_details(issue_string):
 def display_general_dashboard(df_data, figs_container):
     if df_data.empty:
         st.info("No data available for general performance analysis with current filters.")
-        return
+        return figs_container
 
     chart_cols = st.columns(2)
     with chart_cols[0]:
         figs_container['Branch_Issues'] = create_bar_chart(df_data, 'branch', '(Primary)')
-        if figs_container['Branch_Issues']: st.plotly_chart(figs_container['Branch_Issues'], use_container_width=True)
+        if figs_container.get('Branch_Issues'): st.plotly_chart(figs_container['Branch_Issues'], use_container_width=True)
         else: st.caption("No data for Branch chart.")
 
         df_report_type_viz = df_data.copy()
@@ -611,21 +619,21 @@ def display_general_dashboard(df_data, figs_container):
             condition = (df_report_type_viz['report_type'] == 'issues') & (df_report_type_viz['upload_category'] == 'CCTV')
             df_report_type_viz.loc[condition, 'report_type'] = 'CCTV issues'
         figs_container['Report_Type'] = create_bar_chart(df_report_type_viz, 'report_type', '(Primary)')
-        if figs_container['Report_Type']: st.plotly_chart(figs_container['Report_Type'], use_container_width=True)
+        if figs_container.get('Report_Type'): st.plotly_chart(figs_container['Report_Type'], use_container_width=True)
         else: st.caption("No data for Report Type chart.")
     with chart_cols[1]:
         figs_container['Area_Manager'] = create_pie_chart(df_data, 'area_manager', '(Primary)')
-        if figs_container['Area_Manager']: st.plotly_chart(figs_container['Area_Manager'], use_container_width=True)
+        if figs_container.get('Area_Manager'): st.plotly_chart(figs_container['Area_Manager'], use_container_width=True)
         else: st.caption("No data for Area Manager chart.")
         figs_container['Category'] = create_bar_chart(df_data, 'upload_category', '(Primary)')
-        if figs_container['Category']: st.plotly_chart(figs_container['Category'], use_container_width=True)
+        if figs_container.get('Category'): st.plotly_chart(figs_container['Category'], use_container_width=True)
         else: st.caption("No data for Category chart.")
     if 'shift' in df_data.columns and df_data['shift'].notna().any():
         df_shift_data = df_data[df_data['shift'].notna() & (df_data['shift'].astype(str).str.strip() != '')].copy()
         if not df_shift_data.empty:
             with st.container():
                 figs_container['Shift_Values'] = create_bar_chart(df_shift_data, 'shift', '(Primary - CCTV Shift Times)')
-                if figs_container['Shift_Values']:
+                if figs_container.get('Shift_Values'):
                     st.plotly_chart(figs_container['Shift_Values'], use_container_width=True)
                 else: st.caption("No valid shift data to display.")
     if 'date' in df_data.columns and pd.api.types.is_datetime64_any_dtype(df_data['date']) and not df_data['date'].isnull().all():
@@ -639,7 +647,7 @@ def display_general_dashboard(df_data, figs_container):
             fig_trend.add_trace(go.Scatter(x=trend_data_primary['date'], y=trend_data_primary[f'{window_size}-Day MA'], name=f'{window_size}-Day Moving Avg.', mode='lines+markers', line=dict(color='royalblue', width=2), marker=dict(size=5), hovertemplate="<b>%{x|%A, %b %d}</b><br>Moving Avg: %{y:.1f}<extra></extra>"))
             fig_trend.update_layout(title_text='Issues Trend (Primary Period - Based on Issue Dates)', xaxis_title='Date', yaxis_title='Number of Issues', template="plotly_white", hovermode="x unified", legend_title_text='Metric')
             figs_container['Trend'] = fig_trend
-            st.plotly_chart(figs_container['Trend'], use_container_width=True)
+            if figs_container.get('Trend'): st.plotly_chart(figs_container['Trend'], use_container_width=True)
         else: st.caption("No data for trend analysis.")
     if len(df_data) < 50 or (primary_date_range and primary_date_range[0] == primary_date_range[1]):
         st.subheader("Detailed Records (Primary Period - Filtered)")
@@ -665,12 +673,13 @@ def display_general_dashboard(df_data, figs_container):
             else: st.info("No non-empty issue descriptions found for 'Top Issues' (Primary Period).")
         else: st.info("No non-empty issue descriptions found for 'Top Issues' (Primary Period).")
     else: st.info("Issue descriptions column ('issues') not available or empty.")
+    return figs_container
 
 
 def display_complaints_performance_dashboard(df_complaints_raw, figs_container):
     if df_complaints_raw.empty:
         st.info("No complaints data available for performance analysis with current filters.")
-        return figs_container # Return the empty container
+        return figs_container
 
     parsed_details = df_complaints_raw['issues'].apply(parse_complaint_details)
     df_complaints = pd.concat([df_complaints_raw.reset_index(drop=True).drop(columns=['issues'], errors='ignore'),
@@ -771,12 +780,12 @@ def display_complaints_performance_dashboard(df_complaints_raw, figs_container):
         if col in df_display_complaints.columns:
             df_display_complaints[col] = df_display_complaints[col].apply(lambda x: ', '.join(x) if isinstance(x, list) and x else (x if not isinstance(x,list) else ''))
     st.dataframe(df_display_complaints.reset_index(drop=True), use_container_width=True)
-    return figs_container # Return the populated container
+    return figs_container
 
 # --- Main Dashboard Logic ---
-figs_primary = {} # For general dashboard visuals
-figs_complaints_primary = {} # For purely complaints dashboard visuals
-temp_figs_subset_complaints = {} # For complaints subset visuals when data is mixed
+figs_primary = {}
+figs_complaints_primary = {}
+temp_figs_subset_complaints = {}
 
 if not df_primary_period.empty:
     is_purely_complaints_perf = (
@@ -791,7 +800,7 @@ if not df_primary_period.empty:
         figs_complaints_primary = display_complaints_performance_dashboard(df_primary_period.copy(), figs_complaints_primary)
     else:
         st.subheader("General Performance Analysis (Primary Period)")
-        display_general_dashboard(df_primary_period.copy(), figs_primary)
+        figs_primary = display_general_dashboard(df_primary_period.copy(), figs_primary)
         
         df_complaints_subset_in_primary = df_primary_period[
             (df_primary_period['upload_category'] == 'complaints') &
@@ -802,10 +811,9 @@ if not df_primary_period.empty:
             st.markdown("---")
             st.subheader("Complaints Analysis (Subset of Primary Period)")
             temp_figs_subset_complaints = display_complaints_performance_dashboard(df_complaints_subset_in_primary, temp_figs_subset_complaints)
-            # For PDF: Merge subset complaint figs into general figs if general figs exist
-            if figs_primary and temp_figs_subset_complaints:
-                 for key, fig in temp_figs_subset_complaints.items():
-                    figs_primary[f"Subset_{key}"] = fig # Add a prefix to avoid key collision
+            if figs_primary and temp_figs_subset_complaints: # For combined PDF
+                 for key, fig_val in temp_figs_subset_complaints.items(): # Use fig_val to avoid conflict
+                    figs_primary[f"Subset_{key}"] = fig_val
 
     st.markdown("---")
     if st.button("🏆 Show Branch Rankings (Current Filters)", key="show_rankings_button"):
@@ -824,21 +832,19 @@ if not df_primary_period.empty:
                 rank_chart_cols = st.columns(2)
                 with rank_chart_cols[0]:
                     top_n = min(10, len(branch_counts_df))
-                    # Pass the original df with the correct column name for sorting values
                     fig_top_ranked = create_bar_chart(branch_counts_df.head(top_n), 'branch', 
                                                       chart_title=f"Top {top_n} Ranked Branches (Best Performance)",
                                                       sort_ascending=True, 
-                                                      sort_values_by='Total Issues/Complaints') # Corrected sort_values_by
+                                                      sort_values_by='Total Issues/Complaints')
                     if fig_top_ranked: st.plotly_chart(fig_top_ranked, use_container_width=True)
                 
                 with rank_chart_cols[1]:
                     bottom_n = min(10, len(branch_counts_df))
-                    # Create a df sorted descending for bottom N
                     bottom_df_sorted = branch_counts_df.sort_values(by='Total Issues/Complaints', ascending=False)
                     fig_bottom_ranked = create_bar_chart(bottom_df_sorted.head(bottom_n), 'branch', 
                                                          chart_title=f"Bottom {bottom_n} Ranked Branches (Needs Improvement)",
-                                                         sort_ascending=False, # Chart itself will be ascending by branch name
-                                                         sort_values_by='Total Issues/Complaints') # Sort data by count descending
+                                                         sort_ascending=False, 
+                                                         sort_values_by='Total Issues/Complaints')
                     if fig_bottom_ranked: st.plotly_chart(fig_bottom_ranked, use_container_width=True)
         else:
             st.info("No data or branch information available to generate rankings with current filters.")
@@ -846,41 +852,42 @@ else:
     st.info("No data matches the current filter criteria for the primary period.")
 
 # --- Period Comparison Logic ---
-# ... (Period Comparison logic remains largely unchanged but now includes all complaint comparison charts) ...
 df_comp1, df_comp2 = pd.DataFrame(), pd.DataFrame()
 if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
     st.markdown("---"); st.header("📊 Period Comparison Results (Based on Issue Dates)")
-    df_comp1_base = apply_general_filters(df_all_issues, sel_id, sel_branch, sel_cat, sel_am, sel_ft)
-    df_comp1 = df_comp1_base[(df_comp1_base['date'].dt.date >= comparison_date_range_1[0]) & (df_comp1_base['date'].dt.date <= comparison_date_range_1[1])].copy()
-    df_comp2_base = apply_general_filters(df_all_issues, sel_id, sel_branch, sel_cat, sel_am, sel_ft)
-    df_comp2 = df_comp2_base[(df_comp2_base['date'].dt.date >= comparison_date_range_2[0]) & (df_comp2_base['date'].dt.date <= comparison_date_range_2[1])].copy()
+    
+    df_comp1_base_all = apply_general_filters(df_all_issues, sel_id, sel_branch, sel_cat, sel_am, sel_ft)
+    df_comp1_all = df_comp1_base_all[(df_comp1_base_all['date'].dt.date >= comparison_date_range_1[0]) & (df_comp1_base_all['date'].dt.date <= comparison_date_range_1[1])].copy()
+    
+    df_comp2_base_all = apply_general_filters(df_all_issues, sel_id, sel_branch, sel_cat, sel_am, sel_ft)
+    df_comp2_all = df_comp2_base_all[(df_comp2_base_all['date'].dt.date >= comparison_date_range_2[0]) & (df_comp2_base_all['date'].dt.date <= comparison_date_range_2[1])].copy()
+
     p1_label = f"P1 ({comparison_date_range_1[0]:%b %d} - {comparison_date_range_1[1]:%b %d})"
     p2_label = f"P2 ({comparison_date_range_2[0]:%b %d} - {comparison_date_range_2[1]:%b %d})"
     
-    if df_comp1.empty and df_comp2.empty:
-        st.info("No data for comparison in either period with current filters.")
-    else:
-        is_comp_complaints_data_p1 = False
-        if not df_comp1.empty:
-            is_comp_complaints_data_p1 = (df_comp1['upload_category'] == 'complaints').all() and (df_comp1['report_type'] == 'performance').all() and df_comp1['upload_category'].nunique() == 1 and df_comp1['report_type'].nunique() == 1
-        is_comp_complaints_data_p2 = False
-        if not df_comp2.empty:
-            is_comp_complaints_data_p2 = (df_comp2['upload_category'] == 'complaints').all() and (df_comp2['report_type'] == 'performance').all() and df_comp2['upload_category'].nunique() == 1 and df_comp2['report_type'].nunique() == 1
-        
-        if is_comp_complaints_data_p1 and is_comp_complaints_data_p2 :
-            st.subheader("Complaints Performance Comparison")
-            
-            parsed_details_p1 = df_comp1['issues'].apply(parse_complaint_details)
-            df_comp1_parsed = pd.concat([df_comp1.reset_index(drop=True).drop(columns=['issues'], errors='ignore'), parsed_details_p1.reset_index(drop=True)], axis=1)
-            df_comp1_parsed.rename(columns={'Type': 'Complaint Type', 'Product': 'Product Complained About', 'Quality Detail': 'Quality Issue Detail', 'Order Error': 'Order Error Detail'}, inplace=True)
-            df_comp1_parsed['period_label'] = p1_label
-            
-            parsed_details_p2 = df_comp2['issues'].apply(parse_complaint_details)
-            df_comp2_parsed = pd.concat([df_comp2.reset_index(drop=True).drop(columns=['issues'], errors='ignore'), parsed_details_p2.reset_index(drop=True)], axis=1)
-            df_comp2_parsed.rename(columns={'Type': 'Complaint Type', 'Product': 'Product Complained About', 'Quality Detail': 'Quality Issue Detail', 'Order Error': 'Order Error Detail'}, inplace=True)
-            df_comp2_parsed['period_label'] = p2_label
+    # Split data into issues and complaints for each period
+    df_comp1_complaints = df_comp1_all[(df_comp1_all['upload_category'] == 'complaints') & (df_comp1_all['report_type'] == 'performance')].copy()
+    df_comp1_issues = df_comp1_all[~((df_comp1_all['upload_category'] == 'complaints') & (df_comp1_all['report_type'] == 'performance'))].copy()
+    
+    df_comp2_complaints = df_comp2_all[(df_comp2_all['upload_category'] == 'complaints') & (df_comp2_all['report_type'] == 'performance')].copy()
+    df_comp2_issues = df_comp2_all[~((df_comp2_all['upload_category'] == 'complaints') & (df_comp2_all['report_type'] == 'performance'))].copy()
 
-            for df_parsed_comp_period in [df_comp1_parsed, df_comp2_parsed]:
+    # --- Complaints Performance Comparison ---
+    if not df_comp1_complaints.empty or not df_comp2_complaints.empty:
+        st.subheader("Complaints Performance Comparison")
+        
+        parsed_details_p1 = df_comp1_complaints['issues'].apply(parse_complaint_details) if not df_comp1_complaints.empty else pd.DataFrame(columns=MULTI_VALUE_COMPLAINT_COLS + ['Product'])
+        df_comp1_parsed = pd.concat([df_comp1_complaints.reset_index(drop=True).drop(columns=['issues'], errors='ignore'), parsed_details_p1.reset_index(drop=True)], axis=1)
+        df_comp1_parsed.rename(columns={'Type': 'Complaint Type', 'Product': 'Product Complained About', 'Quality Detail': 'Quality Issue Detail', 'Order Error': 'Order Error Detail'}, inplace=True)
+        if not df_comp1_parsed.empty: df_comp1_parsed['period_label'] = p1_label
+        
+        parsed_details_p2 = df_comp2_complaints['issues'].apply(parse_complaint_details) if not df_comp2_complaints.empty else pd.DataFrame(columns=MULTI_VALUE_COMPLAINT_COLS + ['Product'])
+        df_comp2_parsed = pd.concat([df_comp2_complaints.reset_index(drop=True).drop(columns=['issues'], errors='ignore'), parsed_details_p2.reset_index(drop=True)], axis=1)
+        df_comp2_parsed.rename(columns={'Type': 'Complaint Type', 'Product': 'Product Complained About', 'Quality Detail': 'Quality Issue Detail', 'Order Error': 'Order Error Detail'}, inplace=True)
+        if not df_comp2_parsed.empty: df_comp2_parsed['period_label'] = p2_label
+
+        for df_parsed_comp_period in [df_comp1_parsed, df_comp2_parsed]:
+            if not df_parsed_comp_period.empty:
                 for col_name in MULTI_VALUE_COMPLAINT_COLS:
                     if col_name in df_parsed_comp_period.columns:
                         def _sanitize_and_split_elements_comp(entry_list_or_str):
@@ -893,8 +900,13 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                                 elif element is not None: final_elements.append(str(element).strip())
                             return final_elements
                         df_parsed_comp_period[col_name] = df_parsed_comp_period[col_name].apply(_sanitize_and_split_elements_comp)
-            
-            df_combined_complaints_comp = pd.concat([df_comp1_parsed, df_comp2_parsed], ignore_index=True)
+        
+        dfs_to_concat_complaints = []
+        if not df_comp1_parsed.empty: dfs_to_concat_complaints.append(df_comp1_parsed)
+        if not df_comp2_parsed.empty: dfs_to_concat_complaints.append(df_comp2_parsed)
+
+        if dfs_to_concat_complaints:
+            df_combined_complaints_comp = pd.concat(dfs_to_concat_complaints, ignore_index=True)
 
             if not df_combined_complaints_comp.empty:
                 st.markdown("##### Total Complaint Counts by Period")
@@ -975,73 +987,93 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                     else: st.caption("No data for Complaints by Branch comparison chart.")
             else:
                 st.caption("No combined complaints data for comparison.")
-        
-        else: 
-            st.subheader("Overall Issue Counts")
-            col_summary1, col_summary2 = st.columns(2)
-            col_summary1.metric(label=f"Total Issues ({p1_label})", value=f"{len(df_comp1)}")
-            delta_val_comp = len(df_comp2) - len(df_comp1)
-            col_summary2.metric(label=f"Total Issues ({p2_label})", value=f"{len(df_comp2)}", delta=f"{delta_val_comp:+}" if delta_val_comp !=0 else None)
-            st.subheader("Top 5 Issues Comparison (Raw)")
-            col_comp1_disp, col_comp2_disp = st.columns(2)
-            with col_comp1_disp:
-                if not df_comp1.empty and 'issues' in df_comp1.columns:
-                    df_issues_comp1 = df_comp1[['issues']].copy(); df_issues_comp1.dropna(subset=['issues'], inplace=True)
-                    df_issues_comp1['issues_str'] = df_issues_comp1['issues'].astype(str).str.strip()
-                    df_issues_comp1 = df_issues_comp1[df_issues_comp1['issues_str'] != '']
-                    if not df_issues_comp1.empty:
-                        st.markdown(f"**{p1_label}**")
-                        top_issues_df1 = df_issues_comp1['issues_str'].value_counts().nlargest(5).reset_index()
-                        top_issues_df1.columns = ['Issue/Violation', 'Count']
-                        st.dataframe(top_issues_df1, height=220, use_container_width=True)
-                    else: st.info(f"No non-empty issues for {p1_label}")
-                else: st.info(f"No data or 'issues' column for {p1_label}")
-            with col_comp2_disp:
-                if not df_comp2.empty and 'issues' in df_comp2.columns:
-                    df_issues_comp2 = df_comp2[['issues']].copy(); df_issues_comp2.dropna(subset=['issues'], inplace=True)
-                    df_issues_comp2['issues_str'] = df_issues_comp2['issues'].astype(str).str.strip()
-                    df_issues_comp2 = df_issues_comp2[df_issues_comp2['issues_str'] != '']
-                    if not df_issues_comp2.empty:
-                        st.markdown(f"**{p2_label}**")
-                        top_issues_df2 = df_issues_comp2['issues_str'].value_counts().nlargest(5).reset_index()
-                        top_issues_df2.columns = ['Issue/Violation', 'Count']
-                        st.dataframe(top_issues_df2, height=220, use_container_width=True)
-                    else: st.info(f"No non-empty issues for {p2_label}")
-                else: st.info(f"No data or 'issues' column for {p2_label}")
-            df_comp1_labeled = df_comp1.copy(); df_comp2_labeled = df_comp2.copy()
-            if not df_comp1_labeled.empty: df_comp1_labeled['period_label'] = p1_label
-            if not df_comp2_labeled.empty: df_comp2_labeled['period_label'] = p2_label
-            dfs_to_concat = []
-            if not df_comp1_labeled.empty: dfs_to_concat.append(df_comp1_labeled)
-            if not df_comp2_labeled.empty: dfs_to_concat.append(df_comp2_labeled)
-            if dfs_to_concat:
-                df_combined_branch = pd.concat(dfs_to_concat)
-                if not df_combined_branch.empty and 'branch' in df_combined_branch.columns:
-                    fig_branch_comp = create_bar_chart(df_combined_branch, 'branch',
-                                                     chart_title='Issues by Branch Comparison',
-                                                     color_sequence=px.colors.qualitative.Plotly)
-                    if fig_branch_comp: st.plotly_chart(fig_branch_comp, use_container_width=True)
-                    else: st.caption("No branch data for issue comparison chart.")
+        else:
+            st.info("No complaints data found in one or both selected periods for comparison.")
 
-            st.markdown("#### Period-Level Trend (Average Daily Issues)")
-            period_summary_data = []
-            if not df_comp1.empty and 'date' in df_comp1.columns and not df_comp1['date'].isnull().all():
-                avg_issues_p1 = df_comp1.groupby(df_comp1['date'].dt.date).size().mean()
-                period_summary_data.append({'Period': p1_label, 'StartDate': pd.to_datetime(comparison_date_range_1[0]), 'AverageDailyIssues': round(avg_issues_p1, 2)})
-            if not df_comp2.empty and 'date' in df_comp2.columns and not df_comp2['date'].isnull().all():
-                avg_issues_p2 = df_comp2.groupby(df_comp2['date'].dt.date).size().mean()
-                period_summary_data.append({'Period': p2_label, 'StartDate': pd.to_datetime(comparison_date_range_2[0]), 'AverageDailyIssues': round(avg_issues_p2, 2)})
-            if len(period_summary_data) >= 1:
-                df_period_trend = pd.DataFrame(period_summary_data).sort_values('StartDate')
-                chart_title_trend = 'Avg Daily Issues by Period' if len(df_period_trend) == 1 else 'Trend of Avg Daily Issues Across Periods'
-                trend_chart_type = px.bar if len(df_period_trend) == 1 else px.line
-                fig_period_level_trend = trend_chart_type(df_period_trend, x='Period', y='AverageDailyIssues', text='AverageDailyIssues', title=chart_title_trend, markers=(len(df_period_trend) > 1))
-                fig_period_level_trend.update_traces(texttemplate='%{text:.2f}', textposition='outside' if len(df_period_trend) == 1 else 'top center')
-                fig_period_level_trend.update_layout(xaxis_title="Comparison Period", yaxis_title="Avg. Daily Issues", template="plotly_white")
-                st.plotly_chart(fig_period_level_trend, use_container_width=True)
-            else: st.info("Not enough data for period-level trend comparison.")
-elif enable_comparison:
+
+    # --- General Issue Comparison (excluding complaints already handled) ---
+    if not df_comp1_issues.empty or not df_comp2_issues.empty:
+        st.subheader("General Issues Comparison")
+        st.markdown("_(Excluding 'Complaints/Performance' data shown above)_")
+        col_summary1_issues, col_summary2_issues = st.columns(2)
+        col_summary1_issues.metric(label=f"Total Other Issues ({p1_label})", value=f"{len(df_comp1_issues)}")
+        delta_val_comp_issues = len(df_comp2_issues) - len(df_comp1_issues)
+        col_summary2_issues.metric(label=f"Total Other Issues ({p2_label})", value=f"{len(df_comp2_issues)}", delta=f"{delta_val_comp_issues:+}" if delta_val_comp_issues !=0 else None)
+        
+        st.subheader("Top 5 Other Issues Comparison (Raw)")
+        col_comp1_disp_issues, col_comp2_disp_issues = st.columns(2)
+        with col_comp1_disp_issues:
+            if not df_comp1_issues.empty and 'issues' in df_comp1_issues.columns:
+                df_issues_comp1_gen = df_comp1_issues[['issues']].copy(); df_issues_comp1_gen.dropna(subset=['issues'], inplace=True)
+                df_issues_comp1_gen['issues_str'] = df_issues_comp1_gen['issues'].astype(str).str.strip()
+                df_issues_comp1_gen = df_issues_comp1_gen[df_issues_comp1_gen['issues_str'] != '']
+                if not df_issues_comp1_gen.empty:
+                    st.markdown(f"**{p1_label}**")
+                    top_issues_df1_gen = df_issues_comp1_gen['issues_str'].value_counts().nlargest(5).reset_index()
+                    top_issues_df1_gen.columns = ['Issue/Violation', 'Count']
+                    st.dataframe(top_issues_df1_gen, height=220, use_container_width=True)
+                else: st.info(f"No non-empty other issues for {p1_label}")
+            else: st.info(f"No other issue data or 'issues' column for {p1_label}")
+        with col_comp2_disp_issues:
+            if not df_comp2_issues.empty and 'issues' in df_comp2_issues.columns:
+                df_issues_comp2_gen = df_comp2_issues[['issues']].copy(); df_issues_comp2_gen.dropna(subset=['issues'], inplace=True)
+                df_issues_comp2_gen['issues_str'] = df_issues_comp2_gen['issues'].astype(str).str.strip()
+                df_issues_comp2_gen = df_issues_comp2_gen[df_issues_comp2_gen['issues_str'] != '']
+                if not df_issues_comp2_gen.empty:
+                    st.markdown(f"**{p2_label}**")
+                    top_issues_df2_gen = df_issues_comp2_gen['issues_str'].value_counts().nlargest(5).reset_index()
+                    top_issues_df2_gen.columns = ['Issue/Violation', 'Count']
+                    st.dataframe(top_issues_df2_gen, height=220, use_container_width=True)
+                else: st.info(f"No non-empty other issues for {p2_label}")
+            else: st.info(f"No other issue data or 'issues' column for {p2_label}")
+
+        df_comp1_issues_labeled = df_comp1_issues.copy()
+        if not df_comp1_issues_labeled.empty: df_comp1_issues_labeled['period_label'] = p1_label
+        df_comp2_issues_labeled = df_comp2_issues.copy()
+        if not df_comp2_issues_labeled.empty: df_comp2_issues_labeled['period_label'] = p2_label
+        
+        dfs_to_concat_issues = []
+        if not df_comp1_issues_labeled.empty: dfs_to_concat_issues.append(df_comp1_issues_labeled)
+        if not df_comp2_issues_labeled.empty: dfs_to_concat_issues.append(df_comp2_issues_labeled)
+
+        if dfs_to_concat_issues:
+            df_combined_branch_issues = pd.concat(dfs_to_concat_issues)
+            if not df_combined_branch_issues.empty and 'branch' in df_combined_branch_issues.columns:
+                fig_branch_comp_issues = create_bar_chart(df_combined_branch_issues, 'branch',
+                                                 chart_title='Other Issues by Branch Comparison',
+                                                 color_sequence=px.colors.qualitative.Plotly)
+                if fig_branch_comp_issues: st.plotly_chart(fig_branch_comp_issues, use_container_width=True)
+                else: st.caption("No branch data for other issue comparison chart.")
+
+        st.markdown("#### Period-Level Trend (Average Daily Other Issues)")
+        period_summary_data_issues = []
+        if not df_comp1_issues.empty and 'date' in df_comp1_issues.columns and not df_comp1_issues['date'].isnull().all():
+            avg_issues_p1_gen = df_comp1_issues.groupby(df_comp1_issues['date'].dt.date).size().mean()
+            period_summary_data_issues.append({'Period': p1_label, 'StartDate': pd.to_datetime(comparison_date_range_1[0]), 'AverageDailyIssues': round(avg_issues_p1_gen, 2)})
+        
+        if not df_comp2_issues.empty and 'date' in df_comp2_issues.columns and not df_comp2_issues['date'].isnull().all():
+            avg_issues_p2_gen = df_comp2_issues.groupby(df_comp2_issues['date'].dt.date).size().mean()
+            period_summary_data_issues.append({'Period': p2_label, 'StartDate': pd.to_datetime(comparison_date_range_2[0]), 'AverageDailyIssues': round(avg_issues_p2_gen, 2)})
+        
+        if len(period_summary_data_issues) > 0 : # Check if there's any data to plot
+            df_period_trend_issues = pd.DataFrame(period_summary_data_issues).sort_values('StartDate')
+            if not df_period_trend_issues.empty:
+                chart_title_trend_issues = 'Avg Daily Other Issues by Period' if len(df_period_trend_issues) == 1 else 'Trend of Avg Daily Other Issues Across Periods'
+                trend_chart_type_issues = px.bar if len(df_period_trend_issues) == 1 else px.line
+                
+                fig_period_level_trend_issues = trend_chart_type_issues(df_period_trend_issues, x='Period', y='AverageDailyIssues', text='AverageDailyIssues', 
+                                                                      title=chart_title_trend_issues, markers=(len(df_period_trend_issues) > 1))
+                fig_period_level_trend_issues.update_traces(texttemplate='%{text:.2f}', textposition='outside' if len(df_period_trend_issues) == 1 else 'top center')
+                fig_period_level_trend_issues.update_layout(xaxis_title="Comparison Period", yaxis_title="Avg. Daily Other Issues", template="plotly_white")
+                st.plotly_chart(fig_period_level_trend_issues, use_container_width=True)
+            else: st.info("Not enough data for period-level trend comparison for other issues.")
+        else: st.info("Not enough data for period-level trend comparison for other issues.")
+    elif enable_comparison: # If only comparison was enabled but no "other issues" data
+        st.info("No 'Other Issues' data found in selected periods for comparison.")
+
+elif enable_comparison: # If comparison was enabled but date ranges were not set
     st.warning("Comparison periods not properly set. Please check the date ranges in the sidebar.")
+
 
 # --- Downloads Section ---
 st.sidebar.subheader("Downloads")
@@ -1053,7 +1085,6 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
         df_primary_period['upload_category'].nunique() == 1 and
         df_primary_period['report_type'].nunique() == 1
     )
-# Determine if there's a complaints subset being displayed when the main view is mixed
 is_complaints_subset_displayed = False
 if not is_primary_data_purely_complaints_check and 'df_primary_period' in locals() and not df_primary_period.empty:
     if not df_primary_period[ (df_primary_period['upload_category'] == 'complaints') & (df_primary_period['report_type'] == 'performance') ].empty:
@@ -1062,7 +1093,6 @@ if not is_primary_data_purely_complaints_check and 'df_primary_period' in locals
 
 if 'df_primary_period' in locals() and not df_primary_period.empty:
     st.sidebar.markdown("Primary Period Data:")
-    # ... (CSV and Excel download code remains unchanged) ...
     try:
         csv_data_primary = df_primary_period.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
         st.sidebar.download_button("Download Primary (CSV)", csv_data_primary, f"primary_issues_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.csv", "text/csv", key="download_csv_primary")
@@ -1093,9 +1123,7 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
         st.sidebar.download_button(label="Download Primary (Excel)", data=excel_data, file_name=f"primary_data_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_primary_xlsx")
     except Exception as e: st.sidebar.error(f"Primary Excel Error: {e}")
 
-
-    # PDF Visuals Section
-    if is_primary_data_purely_complaints_check: # Purely Complaints View
+    if is_primary_data_purely_complaints_check: 
         if st.sidebar.button("Prepare Complaints Visuals PDF", key="prep_complaints_visuals_pdf_primary"):
             if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set.")
             elif not figs_complaints_primary or not any(figs_complaints_primary.values()): st.sidebar.warning("No complaints visuals to generate PDF.")
@@ -1106,7 +1134,6 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                     complaint_chart_titles_in_order = ["Complaint_Type", "Product_Complained_About", "Quality_Issue_Detail", "Order_Error_Detail", "Complaints_by_Branch", "Complaints_Trend"]
                     for title_key in complaint_chart_titles_in_order:
                         if figs_complaints_primary.get(title_key):
-                            # ... (image generation logic as before) ...
                             fig_obj = figs_complaints_primary[title_key]
                             try:
                                 img_bytes = fig_obj.to_image(format='png', engine='kaleido', scale=1.2, width=700, height=450)
@@ -1121,21 +1148,17 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
         if 'pdf_complaints_visuals_primary_data' in st.session_state:
             st.sidebar.download_button(label="Download Complaints Visuals PDF", data=st.session_state.pdf_complaints_visuals_primary_data, file_name=f"complaints_visuals_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.pdf", mime="application/pdf", key="action_dl_complaints_visuals_pdf", on_click=lambda: st.session_state.pop('pdf_complaints_visuals_primary_data', None))
     
-    else: # General or Mixed View (Option B: Combine subset complaints visuals if they exist)
+    else: # General or Mixed View
         pdf_button_label = "Prepare General Visuals PDF"
+        current_figs_for_pdf = figs_primary.copy() # Start with general or merged general+subset figs
+
         if is_complaints_subset_displayed:
             pdf_button_label = "Prepare Combined Visuals PDF"
+            # temp_figs_subset_complaints would have been merged into figs_primary (now current_figs_for_pdf) by main logic
 
         if st.sidebar.button(pdf_button_label, key="prep_general_or_combined_visuals_pdf"):
             if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set.")
-            
-            # Consolidate figures for PDF
-            all_figs_for_pdf = figs_primary.copy() # Start with general figs
-            if is_complaints_subset_displayed and temp_figs_subset_complaints:
-                for key, fig in temp_figs_subset_complaints.items():
-                    all_figs_for_pdf[f"Subset_{key}"] = fig # Add subset figs with a prefix
-
-            if not all_figs_for_pdf or not any(all_figs_for_pdf.values()): 
+            if not current_figs_for_pdf or not any(current_figs_for_pdf.values()): 
                 st.sidebar.warning("No visuals to generate PDF.")
             else:
                 with st.spinner("Generating Visuals PDF..."):
@@ -1143,7 +1166,7 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                     pdf_title_main = "Combined Visuals Report" if is_complaints_subset_displayed else "General Visuals Report"
                     html_content += f"<h1>{pdf_title_main}</h1><h2>Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}</h2>"
                     
-                    # Define order, general first, then subset complaints
+                    # Define order: General charts first, then potential subset complaint charts
                     general_chart_order = ["Branch_Issues", "Area_Manager", "Report_Type", "Category", "Shift_Values", "Trend"]
                     subset_complaint_chart_order = [f"Subset_{key}" for key in ["Complaint_Type", "Product_Complained_About", "Quality_Issue_Detail", "Order_Error_Detail", "Complaints_by_Branch", "Complaints_Trend"]]
                     
@@ -1152,9 +1175,8 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                         final_chart_order_for_pdf.extend(subset_complaint_chart_order)
 
                     for title_key in final_chart_order_for_pdf:
-                        if all_figs_for_pdf.get(title_key):
-                            # ... (image generation logic as before) ...
-                            fig_obj = all_figs_for_pdf[title_key]
+                        if current_figs_for_pdf.get(title_key):
+                            fig_obj = current_figs_for_pdf[title_key]
                             try:
                                 img_bytes = fig_obj.to_image(format='png', engine='kaleido', scale=1.2, width=700, height=450)
                                 b64_img = base64.b64encode(img_bytes).decode()
@@ -1170,15 +1192,13 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
             dl_filename_prefix = "combined_visuals" if is_complaints_subset_displayed else "general_visuals"
             st.sidebar.download_button(label=f"Download {'Combined' if is_complaints_subset_displayed else 'General'} Visuals PDF", data=st.session_state.pdf_general_or_combined_visuals_data, file_name=f"{dl_filename_prefix}_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.pdf", mime="application/pdf", key="action_dl_general_or_combined_visuals_pdf", on_click=lambda: st.session_state.pop('pdf_general_or_combined_visuals_data', None))
 
-
-    # Data Table PDF (remains largely the same, as it downloads the filtered data)
     if st.sidebar.button("Prepare Data Table PDF (Primary)", key="prep_dashboard_pdf_primary"):
         if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set for PDF generation.")
         else:
             with st.spinner("Generating Data Table PDF for Primary Period..."):
                 df_pdf_view_final = df_primary_period.copy()
                 pdf_title_suffix = "Data"
-                if is_primary_data_purely_complaints_check: # Use the specific check for this PDF type
+                if is_primary_data_purely_complaints_check: 
                     pdf_title_suffix = "Complaints Data"
                     parsed_details_pdf = df_pdf_view_final['issues'].apply(parse_complaint_details)
                     df_pdf_view_final = pd.concat([df_pdf_view_final.reset_index(drop=True).drop(columns=['issues'], errors='ignore'), parsed_details_pdf.reset_index(drop=True)], axis=1)
@@ -1225,19 +1245,18 @@ else:
     st.sidebar.info("No primary period data to download.")
 
 if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
-    # ... (Comparison data CSV download remains unchanged) ...
     st.sidebar.markdown("Comparison Period Data (CSV):")
-    df_comp1_exists = 'df_comp1' in locals() and not df_comp1.empty
-    df_comp2_exists = 'df_comp2' in locals() and not df_comp2.empty
-    if df_comp1_exists:
+    # Use df_comp1_all and df_comp2_all for CSV downloads as they contain the full data for the periods
+    if 'df_comp1_all' in locals() and not df_comp1_all.empty:
         try:
-            csv_c1 = df_comp1.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            csv_c1 = df_comp1_all.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
             st.sidebar.download_button(f"Download P1 Data ({comparison_date_range_1[0]:%b %d}-{comparison_date_range_1[1]:%b %d})", csv_c1, f"comp_p1_{comparison_date_range_1[0]:%Y%m%d}-{comparison_date_range_1[1]:%Y%m%d}.csv", "text/csv", key="dl_csv_comp1")
         except Exception as e: st.sidebar.error(f"P1 CSV Error: {e}")
     else: st.sidebar.caption(f"No data for P1 ({comparison_date_range_1[0]:%b %d}-{comparison_date_range_1[1]:%b %d})")
-    if df_comp2_exists:
+    
+    if 'df_comp2_all' in locals() and not df_comp2_all.empty:
         try:
-            csv_c2 = df_comp2.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            csv_c2 = df_comp2_all.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
             st.sidebar.download_button(f"Download P2 Data ({comparison_date_range_2[0]:%b %d}-{comparison_date_range_2[1]:%b %d})", csv_c2, f"comp_p2_{comparison_date_range_2[0]:%Y%m%d}-{comparison_date_range_2[1]:%Y%m%d}.csv", "text/csv", key="dl_csv_comp2")
         except Exception as e: st.sidebar.error(f"P2 CSV Error: {e}")
     else: st.sidebar.caption(f"No data for P2 ({comparison_date_range_2[0]:%b %d}-{comparison_date_range_2[1]:%b %d})")
