@@ -14,6 +14,13 @@ import re # For parsing complaint details
 # Streamlit config MUST BE THE FIRST STREAMLIT COMMAND
 st.set_page_config(page_title="Performance Dashboard", layout="wide")
 
+# --- Helper function for normalizing project names ---
+def normalize_project_name(name):
+    if pd.isna(name):
+        return "" # Handle NaN or None explicitly
+    # Lowercase, strip leading/trailing whitespace, replace multiple internal spaces with a single space
+    return re.sub(r'\s+', ' ', str(name).lower().strip())
+
 # --- Branch Code to Standardized Name Mapping ---
 BRANCH_SCHEMA = {
     "B01": "NURUH B01", "B02": "KHRUH B02", "B03": "GHRUH B03", "B04": "NSRUH B04",
@@ -30,23 +37,29 @@ BRANCH_SCHEMA = {
 }
 BRANCH_SCHEMA_NORMALIZED = {str(k).strip().upper(): v for k, v in BRANCH_SCHEMA.items()}
 
-PROJECT_FREQUENCIES = {
-    "Check all expiration date": {"type": "weekly", "weekday": 0}, # Monday
+# Original Project Frequencies (keys might have inconsistent spacing/casing)
+PROJECT_FREQUENCIES_ORIGINAL = {
+    "Check all expiration date": {"type": "weekly", "weekday": 0},
     "Cheese powder SOP (in opening)": {"type": "daily"}, "Clean drive thru branches": {"type": "daily"},
-    "Clean ice maker": {"type": "daily"}, "clean shawarma cutter machine  1": {"type": "daily"},
-    "clean shawarma cutter machine  2": {"type": "daily"}, "Cleaning AC filters": {"type": "weekly", "weekday": 0}, # Monday
-    "Cleaning Toilet -- 2-5 am": {"type": "daily"}, "Deeply cleaning": {"type": "weekly", "weekday": 0}, # Monday
-    "Defrost bread to next day": {"type": "daily"}, "Government papers/الأوراق الحكومية": {"type": "weekly", "weekday": 0}, # Monday
+    "Clean ice maker": {"type": "daily"}, "clean shawarma cutter machine  1": {"type": "daily"}, # Note double space
+    "clean shawarma cutter machine  2": {"type": "daily"}, # Note double space
+    "Cleaning AC filters": {"type": "weekly", "weekday": 0},
+    "Cleaning Toilet -- 2-5 am": {"type": "daily"}, "Deeply cleaning": {"type": "weekly", "weekday": 0},
+    "Defrost bread to next day": {"type": "daily"}, "Government papers/الأوراق الحكومية": {"type": "weekly", "weekday": 0},
     "Open The Signboard": {"type": "daily"}, "Preparation A": {"type": "daily"},
     "Quality of  items 12 - 6": {"type": "daily"}, "Shawarma Classic - Closing Checklist": {"type": "daily"},
     "Shawarma Classic - Handover Shift": {"type": "daily"}, "Shawarma Classic - Opening Checklist": {"type": "daily"},
-    "Shawarma machine cleaning ELECTRIC": {"type": "daily"}, "SOP of disc": {"type": "weekly", "weekday": 0}, # Monday
+    "Shawarma machine cleaning ELECTRIC": {"type": "daily"}, "SOP of disc": {"type": "weekly", "weekday": 0},
     "Staff Schedule": {"type": "daily"}, "store arranging": {"type": "daily"},
     "temperature of heaters 1": {"type": "daily"}, "Temperature of heaters 2": {"type": "daily"},
-    "Weekly maintenance": {"type": "weekly", "weekday": 0}, # Monday
+    "Weekly maintenance": {"type": "weekly", "weekday": 0},
     "Shawarma Classic - Opening Checklist- IRRUH NEW": {"type": "daily"},
 }
-ALL_DEFINED_PROJECT_NAMES = list(PROJECT_FREQUENCIES.keys())
+
+# Normalized Project Frequencies and List of Names
+PROJECT_FREQUENCIES_NORMALIZED = {normalize_project_name(k): v for k, v in PROJECT_FREQUENCIES_ORIGINAL.items()}
+ALL_DEFINED_PROJECT_NAMES_NORMALIZED = list(PROJECT_FREQUENCIES_NORMALIZED.keys())
+
 
 DB_PATH = 'issues.db'
 conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
@@ -84,7 +97,7 @@ if 'db_critical_error_msg' in st.session_state: st.error(f"DB Startup Error: {st
 if 'db_schema_updated_flag_uploads' in st.session_state and st.session_state.db_schema_updated_flag_uploads: st.toast("DB 'uploads' schema updated.", icon="ℹ️"); st.session_state.db_schema_updated_flag_uploads = False
 if 'db_schema_updated_flag_issues' in st.session_state and st.session_state.db_schema_updated_flag_issues: st.toast("DB 'issues' schema updated.", icon="ℹ️"); st.session_state.db_schema_updated_flag_issues = False
 
-LOGO_PATH = "company_logo.png" # Replace with your actual logo path or URL
+LOGO_PATH = "company_logo.png"
 
 def check_login():
     if 'authenticated' not in st.session_state: st.session_state.authenticated = False; st.session_state.user_name = None; st.session_state.user_role = None
@@ -164,7 +177,7 @@ if is_admin:
 
         file_data = up_file.getvalue()
         timestamp_now = datetime.now().isoformat()
-        up_sub_date_str = imp_from.isoformat() # Using import_from as submission date for the batch
+        up_sub_date_str = imp_from.isoformat()
 
         try:
             c.execute('SELECT COUNT(*) FROM uploads WHERE filename=? AND uploader=? AND file_type IS ? AND category=? AND submission_date=?', (up_file.name, current_user, final_ft_val, final_cat_val, up_sub_date_str))
@@ -176,7 +189,7 @@ if is_admin:
             EXCEL_CODE_COL = 'code'; STD_EXCEL_ISSUES_COL = 'issues'; STD_EXCEL_BRANCH_COL = 'branch'
             STD_EXCEL_AM_COL = 'area manager'; STD_EXCEL_DATE_COL = 'date'
             CCTV_VIOLATION_COL = 'choose the violation - اختر المخالفه'; CCTV_SHIFT_COL = 'choose the shift - اختر الشفت'
-            CCTV_DATE_COL = 'date submitted'; CCTV_BRANCH_COL = 'branch'; CCTV_AM_COL = 'area manager' # Note: CCTV has its own branch/AM columns
+            CCTV_DATE_COL = 'date submitted'; CCTV_BRANCH_COL = 'branch'; CCTV_AM_COL = 'area manager'
             COMP_BRANCH_COL = 'branch'; COMP_TYPE_COL = 'نوع الشكوى'; COMP_PROD_COL = 'الشكوى على اي منتج؟'
             COMP_QUAL_COL = 'فى حاله كانت الشكوى جوده برجاء تحديد نوع الشكوى'; COMP_ORDER_ERR_COL = 'فى حاله خطاء فى الطلب برجاء تحديد نوع الشكوى'
             COMP_DATE_COL = 'date'
@@ -198,9 +211,9 @@ if is_admin:
                 if norm_ft == 'performance':
                     req_cols_up = [MISSING_PROJECT_COL, MISSING_BRANCH_COL, MISSING_AM_COL, MISSING_DATE_COL]; date_col_excel = MISSING_DATE_COL
                 else: st.sidebar.error(f"Invalid file type '{final_ft_val}' for 'missing'."); st.stop()
-            elif norm_cat == 'visits': # Assuming visits might use standard cols or need specifics
+            elif norm_cat == 'visits':
                 req_cols_up = [EXCEL_CODE_COL, STD_EXCEL_BRANCH_COL, STD_EXCEL_AM_COL, STD_EXCEL_ISSUES_COL, STD_EXCEL_DATE_COL]; date_col_excel = STD_EXCEL_DATE_COL
-            else: # Default for operation-training, meal training etc.
+            else: 
                 req_cols_up = [EXCEL_CODE_COL, STD_EXCEL_ISSUES_COL, STD_EXCEL_BRANCH_COL, STD_EXCEL_AM_COL, STD_EXCEL_DATE_COL]; date_col_excel = STD_EXCEL_DATE_COL
 
             missing_cols = [col for col in req_cols_up if col not in df_excel.columns]
@@ -240,34 +253,38 @@ if is_admin:
 
                 if norm_cat == 'complaints' and norm_ft == 'performance':
                     excel_branch_str = str(row_data.get(COMP_BRANCH_COL, "Unk Comp Branch"))
-                    code_from_excel_col = str(row_data.get(EXCEL_CODE_COL, "")).strip() # Complaints can have a code
-                    am_val_row = "N/A - Complaints" # AM not typically in complaints source
+                    code_from_excel_col = str(row_data.get(EXCEL_CODE_COL, "")).strip()
+                    am_val_row = "N/A - Complaints"
                     details_list = [f"Type: {str(row_data.get(COMP_TYPE_COL)).strip()}" if pd.notna(row_data.get(COMP_TYPE_COL)) else None,
                                     f"Product: {str(row_data.get(COMP_PROD_COL)).strip()}" if pd.notna(row_data.get(COMP_PROD_COL)) else None,
                                     f"Quality Detail: {str(row_data.get(COMP_QUAL_COL)).strip()}" if pd.notna(row_data.get(COMP_QUAL_COL)) else None,
                                     f"Order Error: {str(row_data.get(COMP_ORDER_ERR_COL)).strip()}" if pd.notna(row_data.get(COMP_ORDER_ERR_COL)) else None]
                     iss_val = "; ".join(filter(None, details_list)) or "No specific complaint details"
                 elif norm_cat == 'cctv':
-                    excel_branch_str = str(row_data.get(CCTV_BRANCH_COL, "Unk CCTV Branch")) # Use CCTV specific branch col
+                    excel_branch_str = str(row_data.get(CCTV_BRANCH_COL, "Unk CCTV Branch"))
                     code_from_excel_col = str(row_data.get(EXCEL_CODE_COL, "")).strip()
-                    am_val_row = str(row_data.get(CCTV_AM_COL, "N/A")) # Use CCTV specific AM col
+                    am_val_row = str(row_data.get(CCTV_AM_COL, "N/A"))
                     iss_val = str(row_data.get(CCTV_VIOLATION_COL, "N/A"))
                     shift_val_row = str(row_data.get(CCTV_SHIFT_COL)) if pd.notna(row_data.get(CCTV_SHIFT_COL)) else None
                 elif norm_cat == 'missing' and norm_ft == 'performance':
                     excel_branch_str = str(row_data.get(MISSING_BRANCH_COL, "Unk Missing Branch")).strip()
-                    iss_val = str(row_data.get(MISSING_PROJECT_COL, "Unk Project")).strip() # Project name is the 'issue'
+                    # Apply normalization to project name during ingestion
+                    iss_val = normalize_project_name(row_data.get(MISSING_PROJECT_COL, "Unk Project"))
                     am_val_row = str(row_data.get(MISSING_AM_COL, "N/A")).strip()
-                    code_from_excel_col = "" # Missing category does not use 'code' column from Excel for branch ID by design
+                    code_from_excel_col = ""
                 elif norm_cat == 'visits': 
                     excel_branch_str = str(row_data.get(STD_EXCEL_BRANCH_COL, "Unk Visit Branch"))
                     code_from_excel_col = str(row_data.get(EXCEL_CODE_COL, "")).strip()
                     am_val_row = str(row_data.get(STD_EXCEL_AM_COL, "N/A - Visits"))
                     iss_val = str(row_data.get(STD_EXCEL_ISSUES_COL, "Visit Logged"))
-                else: # Default (operation-training, etc.)
+                else: 
                     excel_branch_str = str(row_data.get(STD_EXCEL_BRANCH_COL, "Unk Std Branch"))
                     code_from_excel_col = str(row_data.get(EXCEL_CODE_COL, "")).strip()
                     am_val_row = str(row_data.get(STD_EXCEL_AM_COL, "N/A"))
                     iss_val = str(row_data.get(STD_EXCEL_ISSUES_COL, "N/A"))
+                    if norm_cat == 'operation-training': # Example if op-training also uses 'issues' as project names
+                        iss_val = normalize_project_name(row_data.get(STD_EXCEL_ISSUES_COL, "N/A"))
+
 
                 std_branch_name = "Unknown Branch"; db_code_val = ""
                 norm_excel_branch_str = excel_branch_str.strip().upper()
@@ -276,16 +293,15 @@ if is_admin:
 
                 if extracted_code and extracted_code in BRANCH_SCHEMA_NORMALIZED:
                     std_branch_name = BRANCH_SCHEMA_NORMALIZED[extracted_code]; db_code_val = extracted_code
-                elif code_from_excel_col and code_from_excel_col.upper() in BRANCH_SCHEMA_NORMALIZED: # Check 'code' column if provided
+                elif code_from_excel_col and code_from_excel_col.upper() in BRANCH_SCHEMA_NORMALIZED:
                     std_branch_name = BRANCH_SCHEMA_NORMALIZED[code_from_excel_col.upper()]; db_code_val = code_from_excel_col.upper()
                 else:
                     match_found = False
                     for sc_code, sc_name in BRANCH_SCHEMA_NORMALIZED.items():
-                        if norm_excel_branch_str == sc_name.upper(): # Try matching full branch name from Excel with schema values
+                        if norm_excel_branch_str == sc_name.upper():
                             std_branch_name = sc_name; db_code_val = sc_code; match_found = True; break
-                    if not match_found: # If no match found by code or full name
-                        std_branch_name = excel_branch_str # Fallback to original excel string
-                        db_code_val = code_from_excel_col # Which might be empty
+                    if not match_found:
+                        std_branch_name = excel_branch_str; db_code_val = code_from_excel_col
                         unmapped_branches.add(f"{excel_branch_str} (Code: {db_code_val or 'N/A'})")
                 
                 if not db_code_val and std_branch_name != "Unknown Branch" and std_branch_name.upper() != excel_branch_str.upper() :
@@ -656,9 +672,14 @@ def display_complaints_performance_dashboard(df_complaints_raw, figs_container):
     st.dataframe(df_display_complaints.reset_index(drop=True), use_container_width=True)
     return figs_container
 
-def get_expected_task_count(project_name, start_date_obj, end_date_obj):
-    if project_name not in PROJECT_FREQUENCIES: return 0
-    config = PROJECT_FREQUENCIES[project_name]
+# Uses PROJECT_FREQUENCIES_NORMALIZED (global)
+def get_expected_task_count(project_name_norm, start_date_obj, end_date_obj):
+    if project_name_norm not in PROJECT_FREQUENCIES_NORMALIZED:
+        # This might happen if ALL_DEFINED_PROJECT_NAMES_NORMALIZED was somehow different,
+        # or if a name was passed that wasn't from that list.
+        # st.sidebar.warning(f"Task '{project_name_norm}' not in normalized frequency definitions.")
+        return 0
+    config = PROJECT_FREQUENCIES_NORMALIZED[project_name_norm]
     expected_count = 0
     if start_date_obj > end_date_obj: return 0 
 
@@ -679,25 +700,32 @@ def display_missing_performance_dashboard(df_missing_raw_period_data, figs_conta
     results = []
     all_branches_to_calculate_for = sorted(list(BRANCH_SCHEMA_NORMALIZED.values())) 
 
+    # Ensure the 'issues' column in df_missing_raw_period_data is also normalized if it wasn't already at ingestion
+    # However, our strategy is to normalize at ingestion, so it should be fine.
+    # If df_missing_raw_period_data['issues'] is not normalized, you'd do it here:
+    # df_missing_raw_period_data['issues_normalized_temp'] = df_missing_raw_period_data['issues'].apply(normalize_project_name)
+    # And then use 'issues_normalized_temp' for comparison. But this is less efficient.
+
     for branch_name in all_branches_to_calculate_for:
         total_expected_for_branch = 0
         total_missed_for_branch = 0
         
-        if 'issues' not in df_missing_raw_period_data.columns or \
-           'branch' not in df_missing_raw_period_data.columns:
-           pass 
-
+        # Filter for the current branch. 'branch' column in df_missing_raw_period_data should be standardized.
         df_branch_missed_tasks = df_missing_raw_period_data[df_missing_raw_period_data['branch'] == branch_name]
 
-        for project_name in ALL_DEFINED_PROJECT_NAMES:
-            expected_for_project = get_expected_task_count(project_name, start_date_calc, end_date_calc)
+        # The 'issues' column in df_branch_missed_tasks should contain project names
+        # that were ALREADY NORMALIZED during the ingestion process.
+        
+        for project_name_norm in ALL_DEFINED_PROJECT_NAMES_NORMALIZED: # Iterate using globally normalized defined names
+            expected_for_project = get_expected_task_count(project_name_norm, start_date_calc, end_date_calc)
             if expected_for_project == 0: continue 
             
             total_expected_for_branch += expected_for_project
             
             missed_count_for_project = 0
-            if not df_branch_missed_tasks.empty: 
-                 missed_count_for_project = len(df_branch_missed_tasks[df_branch_missed_tasks['issues'] == project_name])
+            if not df_branch_missed_tasks.empty and 'issues' in df_branch_missed_tasks.columns:
+                 # Compare the already normalized 'issues' from DB with the 'project_name_norm'
+                 missed_count_for_project = len(df_branch_missed_tasks[df_branch_missed_tasks['issues'] == project_name_norm])
             
             total_missed_for_branch += missed_count_for_project
         
