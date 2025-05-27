@@ -177,8 +177,6 @@ if is_admin:
             c.execute('SELECT COUNT(*) FROM uploads WHERE filename=? AND uploader=? AND file_type IS ? AND category=? AND submission_date=?', (up_file.name, current_user, final_ft_val, final_cat_val, up_sub_date_str))
             if c.fetchone()[0] > 0: st.sidebar.warning(f"Duplicate upload batch for '{up_file.name}' seems to exist. Processing.")
 
-            # Explicitly set header=0 to ensure the first row is treated as headers.
-            # If "Unnamed: X" columns still appear, the issue is with the Excel file itself (e.g., blank first row, not a true Excel format).
             df_excel = pd.read_excel(io.BytesIO(file_data), header=0)
             df_excel.columns = [str(col).strip().lower().replace('\n', ' ').replace('\r', '') for col in df_excel.columns]
 
@@ -205,7 +203,8 @@ if is_admin:
                 else: st.sidebar.error(f"Invalid file type '{final_ft_val}' for 'complaints'."); st.stop()
             elif norm_cat == 'missing':
                 if norm_ft == 'performance':
-                    req_cols_up = [MISSING_PROJECT_COL, MISSING_BRANCH_COL, EXCEL_CODE_COL, MISSING_AM_COL, MISSING_DATE_COL]; date_col_excel = MISSING_DATE_COL
+                    # Corrected order: project, code, branch, area manager, date
+                    req_cols_up = [MISSING_PROJECT_COL, EXCEL_CODE_COL, MISSING_BRANCH_COL, MISSING_AM_COL, MISSING_DATE_COL]; date_col_excel = MISSING_DATE_COL
                 else: st.sidebar.error(f"Invalid file type '{final_ft_val}' for 'missing'."); st.stop()
             elif norm_cat == 'visits':
                 req_cols_up = [EXCEL_CODE_COL, STD_EXCEL_BRANCH_COL, STD_EXCEL_AM_COL, STD_EXCEL_ISSUES_COL, STD_EXCEL_DATE_COL]; date_col_excel = STD_EXCEL_DATE_COL
