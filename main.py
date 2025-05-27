@@ -1039,27 +1039,37 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
 
                     # Top N General Issues Comparison
                     if 'issues' in df_combined_gen_issues.columns:
+                        # Ensure 'issues' column is string type and handle NaNs before value_counts
+                        df_combined_gen_issues['issues'] = df_combined_gen_issues['issues'].astype(str).fillna("N/A_issue")
+
                         df_top_issues_comp_data = df_combined_gen_issues.groupby(['issues', 'period_label']).size().reset_index(name='count')
+                        
+                        # Get top N issues based on total occurrences across both periods
                         overall_top_issues_list = df_combined_gen_issues['issues'].value_counts().nlargest(TOP_N_GENERAL_ISSUES_COMPARISON).index.tolist()
                         
-                        # Filter for only the overall top N issues
+                        # Filter the grouped data for only these overall top N issues
                         df_top_issues_comp_filtered = df_top_issues_comp_data[df_top_issues_comp_data['issues'].isin(overall_top_issues_list)].copy()
                         
                         if not df_top_issues_comp_filtered.empty:
-                             # Ensure all top N issues are present for both periods (with 0 count if missing) for consistent charting
                             pivot_df = df_top_issues_comp_filtered.pivot_table(index='issues', columns='period_label', values='count', fill_value=0).reset_index()
-                            df_top_issues_for_chart = pivot_df.melt(id_vars='issues', value_vars=[p1_lab, p2_lab], var_name='period_label', value_name='count')
-                            # Sort for better visualization (by issue, then period)
-                            df_top_issues_for_chart = df_top_issues_for_chart.sort_values(by=['issues', 'period_label'])
+                            
+                            # --- FIX: Ensure both period columns exist before melting ---
+                            if p1_lab not in pivot_df.columns:
+                                pivot_df[p1_lab] = 0
+                            if p2_lab not in pivot_df.columns:
+                                pivot_df[p2_lab] = 0
+                            # --- END FIX ---
 
+                            df_top_issues_for_chart = pivot_df.melt(id_vars='issues', value_vars=[p1_lab, p2_lab], var_name='period_label', value_name='count')
+                            df_top_issues_for_chart = df_top_issues_for_chart.sort_values(by=['issues', 'period_label'])
 
                             fig_top_issues_comp = px.bar(df_top_issues_for_chart, x='issues', y='count', color='period_label',
                                                          barmode='group', title=f'Top {TOP_N_GENERAL_ISSUES_COMPARISON} General Issues Comparison')
-                            fig_top_issues_comp.update_xaxes(categoryorder='total descending') # Show issues with highest total count first
+                            fig_top_issues_comp.update_xaxes(categoryorder='total descending') 
                             if fig_top_issues_comp: st.plotly_chart(fig_top_issues_comp, use_container_width=True)
-                            else: st.caption(f"No data for Top {TOP_N_GENERAL_ISSUES_COMPARISON} General Issues Comparison.")
+                            else: st.caption(f"Could not generate Top {TOP_N_GENERAL_ISSUES_COMPARISON} General Issues Comparison chart.")
                         else:
-                            st.caption(f"Not enough data to compare Top {TOP_N_GENERAL_ISSUES_COMPARISON} General Issues.")
+                            st.caption(f"Not enough distinct data to compare Top {TOP_N_GENERAL_ISSUES_COMPARISON} General Issues.")
                     else:
                         st.caption("Issues column not available for Top N General Issues Comparison.")
 
