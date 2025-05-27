@@ -86,6 +86,7 @@ category_file_types = {
 }
 all_categories = list(category_file_types.keys())
 MULTI_VALUE_COMPLAINT_COLS = ['Complaint Type', 'Quality Issue Detail', 'Order Error Detail']
+TOP_N_GENERAL_ISSUES_COMPARISON = 15 # For comparing top N general issues between periods
 
 if 'db_critical_error_msg' in st.session_state: st.error(f"DB Startup Error: {st.session_state.db_critical_error_msg}"); del st.session_state.db_critical_error_msg
 if 'db_schema_updated_flag_uploads' in st.session_state and st.session_state.db_schema_updated_flag_uploads: st.toast("DB 'uploads' schema updated.", icon="ℹ️"); st.session_state.db_schema_updated_flag_uploads = False
@@ -439,6 +440,7 @@ def create_bar_chart(df_source, group_col, title_suffix="", chart_title=None, co
     if not df_valid_data.empty:
         if 'period_label' in df_valid_data.columns: 
             data = df_valid_data.groupby([group_col, 'period_label']).size().reset_index(name='count')
+            # For comparison charts, sorting by group_col then period_label is often clearer than by count
             data = data.sort_values(by=[group_col, 'period_label'], ascending=[True, True]) 
             if not data.empty:
                 return px.bar(data, x=group_col, y='count', color='period_label', barmode=barmode, title=final_title, template="plotly_white", color_discrete_sequence=color_sequence or px.colors.qualitative.Plotly)
@@ -614,13 +616,13 @@ def display_complaints_performance_dashboard(df_complaints_raw, figs_container):
     with col1:
         df_type_chart_data = df_complaints.explode('Complaint Type').dropna(subset=['Complaint Type'])
         df_type_chart_data = df_type_chart_data[df_type_chart_data['Complaint Type'] != ''] 
-        figs_container['Complaint_Type'] = create_bar_chart(df_type_chart_data, 'Complaint Type', chart_title="Complaints by Type", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
+        figs_container['Complaint_Type'] = create_bar_chart(df_type_chart_data, 'Complaint Type', chart_title="Complaints by Type", color_sequence=COMPLAINTS_COLOR_SEQUENCE, barmode='stack') # Changed to stack for single period view
         if figs_container.get('Complaint_Type'): st.plotly_chart(figs_container['Complaint_Type'], use_container_width=True)
         else: st.caption("No data for Complaint Type chart.")
 
         df_product_chart_source = df_complaints[df_complaints['Product Complained About'].notna() & (df_complaints['Product Complained About'] != '') & (df_complaints['Product Complained About'].str.lower() != 'لا علاقة لها بالمنتج')].copy()
         if not df_product_chart_source.empty:
-            figs_container['Product_Complained_About'] = create_bar_chart(df_product_chart_source, 'Product Complained About', chart_title="Complaints by Product (Specific Products)", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
+            figs_container['Product_Complained_About'] = create_bar_chart(df_product_chart_source, 'Product Complained About', chart_title="Complaints by Product (Specific Products)", color_sequence=COMPLAINTS_COLOR_SEQUENCE, barmode='stack')
             if figs_container.get('Product_Complained_About'): st.plotly_chart(figs_container['Product_Complained_About'], use_container_width=True)
             else: st.caption("No data for Product chart (filtered).")
         else: st.info("No complaints on specific products (excluding 'لا علاقة لها بالمنتج').")
@@ -632,7 +634,7 @@ def display_complaints_performance_dashboard(df_complaints_raw, figs_container):
         if not df_quality_issues_source.empty:
             df_quality_detail_chart_data = df_quality_issues_source.explode('Quality Issue Detail').dropna(subset=['Quality Issue Detail'])
             df_quality_detail_chart_data = df_quality_detail_chart_data[df_quality_detail_chart_data['Quality Issue Detail'] != '']
-            figs_container['Quality_Issue_Detail'] = create_bar_chart(df_quality_detail_chart_data, 'Quality Issue Detail', chart_title="Quality Issue Details (for 'جوده' complaints)", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
+            figs_container['Quality_Issue_Detail'] = create_bar_chart(df_quality_detail_chart_data, 'Quality Issue Detail', chart_title="Quality Issue Details (for 'جوده' complaints)", color_sequence=COMPLAINTS_COLOR_SEQUENCE, barmode='stack')
             if figs_container.get('Quality_Issue_Detail'): st.plotly_chart(figs_container['Quality_Issue_Detail'], use_container_width=True)
             else: st.caption("No specific quality details for 'جوده' complaints.")
         else: st.caption("No 'جوده' (Quality) type complaints to detail.")
@@ -643,13 +645,13 @@ def display_complaints_performance_dashboard(df_complaints_raw, figs_container):
         if not df_order_errors_source.empty:
             df_order_error_detail_chart_data = df_order_errors_source.explode('Order Error Detail').dropna(subset=['Order Error Detail'])
             df_order_error_detail_chart_data = df_order_error_detail_chart_data[df_order_error_detail_chart_data['Order Error Detail'] != '']
-            figs_container['Order_Error_Detail'] = create_bar_chart(df_order_error_detail_chart_data, 'Order Error Detail', chart_title="Order Error Details (for 'خطاء فى الطلب' complaints)", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
+            figs_container['Order_Error_Detail'] = create_bar_chart(df_order_error_detail_chart_data, 'Order Error Detail', chart_title="Order Error Details (for 'خطاء فى الطلب' complaints)", color_sequence=COMPLAINTS_COLOR_SEQUENCE, barmode='stack')
             if figs_container.get('Order_Error_Detail'): st.plotly_chart(figs_container['Order_Error_Detail'], use_container_width=True)
             else: st.caption("No specific order error details for 'خطاء فى الطلب' complaints.")
         else: st.caption("No 'خطاء فى الطلب' (Order Error) type complaints to detail.")
     
     st.subheader("Complaints by Branch")
-    figs_container['Complaints_by_Branch'] = create_bar_chart(df_complaints, 'branch', chart_title="Total Complaints per Branch", color_sequence=COMPLAINTS_COLOR_SEQUENCE)
+    figs_container['Complaints_by_Branch'] = create_bar_chart(df_complaints, 'branch', chart_title="Total Complaints per Branch", color_sequence=COMPLAINTS_COLOR_SEQUENCE, barmode='stack')
     if figs_container.get('Complaints_by_Branch'): st.plotly_chart(figs_container['Complaints_by_Branch'], use_container_width=True)
     else: st.caption("No data for Complaints by Branch chart.")
 
@@ -925,7 +927,10 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                 df_p['period_label'] = period_label
                 for col_name_comp in MULTI_VALUE_COMPLAINT_COLS:
                     if col_name_comp in df_p.columns:
-                        df_p[col_name_comp] = df_p[col_name_comp].apply(lambda x_list: [str(item) for item in x_list if item] if isinstance(x_list, list) else [])
+                        # Ensure elements are strings and handle None within lists
+                        df_p[col_name_comp] = df_p[col_name_comp].apply(
+                            lambda x_list: [str(item).strip() for item in x_list if item and str(item).strip()] if isinstance(x_list, list) else []
+                        )
                 return df_p
 
             df_c1_parsed_comp = _prepare_complaints_df_for_comp(df_comp1_complaints_data, p1_lab)
@@ -942,20 +947,61 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                     with cc1_metric: st.metric(f"Total Complaints ({p1_lab})", total_c1)
                     with cc2_metric: st.metric(f"Total Complaints ({p2_lab})", total_c2, delta=f"{delta_c:+}" if delta_c!=0 else None, delta_color="inverse" if delta_c < 0 else "normal")
 
-                    comp_chart_cols_c1, comp_chart_cols_c2 = st.columns(2)
-                    with comp_chart_cols_c1: 
+                    comp_chart_cols_row1_c1, comp_chart_cols_row1_c2 = st.columns(2)
+                    with comp_chart_cols_row1_c1:
+                        fig_branch_cc = create_bar_chart(df_combined_complaints_comp, 'branch', chart_title='Complaints by Branch Comparison', color_sequence=COMPLAINTS_COLOR_SEQUENCE, barmode='group')
+                        if fig_branch_cc: st.plotly_chart(fig_branch_cc, use_container_width=True)
+                        else: st.caption("No data for Branch Comparison (Complaints).")
+                    
+                    with comp_chart_cols_row1_c2: 
                         if 'Complaint Type' in df_combined_complaints_comp.columns:
                             df_type_c_exploded = df_combined_complaints_comp.explode('Complaint Type').dropna(subset=['Complaint Type'])
                             df_type_c_exploded = df_type_c_exploded[df_type_c_exploded['Complaint Type'] != '']
                             if not df_type_c_exploded.empty:
                                 fig_type_cc = create_bar_chart(df_type_c_exploded, 'Complaint Type', chart_title='Complaint Types Comparison', color_sequence=COMPLAINTS_COLOR_SEQUENCE, barmode='group')
                                 if fig_type_cc: st.plotly_chart(fig_type_cc, use_container_width=True)
-                    with comp_chart_cols_c2: 
+                            else: st.caption("No data for Complaint Type Comparison.")
+                        else: st.caption("Complaint Type column not available for comparison.")
+                    
+                    comp_chart_cols_row2_c1, comp_chart_cols_row2_c2 = st.columns(2)
+                    with comp_chart_cols_row2_c1: 
                         if 'Product Complained About' in df_combined_complaints_comp.columns:
                             df_prod_c_src = df_combined_complaints_comp[df_combined_complaints_comp['Product Complained About'].notna() & (df_combined_complaints_comp['Product Complained About'] != '') & (df_combined_complaints_comp['Product Complained About'].str.lower() != 'لا علاقة لها بالمنتج')].copy()
                             if not df_prod_c_src.empty:
                                 fig_prod_cc = create_bar_chart(df_prod_c_src, 'Product Complained About', chart_title='Complaints by Product Comparison', color_sequence=COMPLAINTS_COLOR_SEQUENCE, barmode='group')
                                 if fig_prod_cc: st.plotly_chart(fig_prod_cc, use_container_width=True)
+                            else: st.caption("No data for Product Comparison (Complaints).")
+                        else: st.caption("Product Complained About column not available for comparison.")
+
+                    with comp_chart_cols_row2_c2:
+                        if 'Quality Issue Detail' in df_combined_complaints_comp.columns:
+                            # Filter for "جوده" type complaints first
+                            df_quality_comp_source = df_combined_complaints_comp[
+                                df_combined_complaints_comp['Complaint Type'].apply(lambda x: 'جوده' in x if isinstance(x, list) else False)
+                            ].copy()
+                            if not df_quality_comp_source.empty:
+                                df_quality_detail_comp_data = df_quality_comp_source.explode('Quality Issue Detail').dropna(subset=['Quality Issue Detail'])
+                                df_quality_detail_comp_data = df_quality_detail_comp_data[df_quality_detail_comp_data['Quality Issue Detail'] != '']
+                                if not df_quality_detail_comp_data.empty:
+                                    fig_quality_detail_cc = create_bar_chart(df_quality_detail_comp_data, 'Quality Issue Detail', chart_title="Quality Issue Details Comparison (for 'جوده')", color_sequence=COMPLAINTS_COLOR_SEQUENCE, barmode='group')
+                                    if fig_quality_detail_cc: st.plotly_chart(fig_quality_detail_cc, use_container_width=True)
+                                else: st.caption("No Quality Issue Details to compare for 'جوده' complaints.")
+                            else: st.caption("No 'جوده' complaints to compare details for.")
+                        else: st.caption("Quality Issue Detail column not available for comparison.")
+                    
+                    if 'Order Error Detail' in df_combined_complaints_comp.columns:
+                        df_order_error_comp_source = df_combined_complaints_comp[
+                            df_combined_complaints_comp['Complaint Type'].apply(lambda x: 'خطاء فى الطلب' in x if isinstance(x, list) else False)
+                        ].copy()
+                        if not df_order_error_comp_source.empty:
+                            df_order_error_detail_comp_data = df_order_error_comp_source.explode('Order Error Detail').dropna(subset=['Order Error Detail'])
+                            df_order_error_detail_comp_data = df_order_error_detail_comp_data[df_order_error_detail_comp_data['Order Error Detail'] != '']
+                            if not df_order_error_detail_comp_data.empty:
+                                fig_order_error_detail_cc = create_bar_chart(df_order_error_detail_comp_data, 'Order Error Detail', chart_title="Order Error Details Comparison (for 'خطاء فى الطلب')", color_sequence=COMPLAINTS_COLOR_SEQUENCE, barmode='group')
+                                if fig_order_error_detail_cc: st.plotly_chart(fig_order_error_detail_cc, use_container_width=True)
+                            else: st.caption("No Order Error Details to compare for 'خطاء فى الطلب' complaints.")
+                        else: st.caption("No 'خطاء فى الطلب' complaints to compare details for.")
+                    else: st.caption("Order Error Detail column not available for comparison.")
             st.markdown("---") 
 
         df_comp1_gen_issues = df_comp1[~((df_comp1['upload_category'].astype(str).str.lower() == 'complaints') & (df_comp1['report_type'].astype(str).str.lower() == 'performance')) & \
@@ -985,9 +1031,37 @@ if enable_comparison and comparison_date_range_1 and comparison_date_range_2:
                     with gen_chart_cols_c1: 
                         fig_branch_gen_comp = create_bar_chart(df_combined_gen_issues, 'branch', chart_title='General Issues by Branch Comparison', barmode='group')
                         if fig_branch_gen_comp: st.plotly_chart(fig_branch_gen_comp, use_container_width=True)
+                        else: st.caption("No data for Branch Comparison (General Issues).")
                     with gen_chart_cols_c2: 
                         fig_cat_gen_comp = create_bar_chart(df_combined_gen_issues, 'upload_category', chart_title='General Issues by Category Comparison', barmode='group')
                         if fig_cat_gen_comp: st.plotly_chart(fig_cat_gen_comp, use_container_width=True)
+                        else: st.caption("No data for Category Comparison (General Issues).")
+
+                    # Top N General Issues Comparison
+                    if 'issues' in df_combined_gen_issues.columns:
+                        df_top_issues_comp_data = df_combined_gen_issues.groupby(['issues', 'period_label']).size().reset_index(name='count')
+                        overall_top_issues_list = df_combined_gen_issues['issues'].value_counts().nlargest(TOP_N_GENERAL_ISSUES_COMPARISON).index.tolist()
+                        
+                        # Filter for only the overall top N issues
+                        df_top_issues_comp_filtered = df_top_issues_comp_data[df_top_issues_comp_data['issues'].isin(overall_top_issues_list)].copy()
+                        
+                        if not df_top_issues_comp_filtered.empty:
+                             # Ensure all top N issues are present for both periods (with 0 count if missing) for consistent charting
+                            pivot_df = df_top_issues_comp_filtered.pivot_table(index='issues', columns='period_label', values='count', fill_value=0).reset_index()
+                            df_top_issues_for_chart = pivot_df.melt(id_vars='issues', value_vars=[p1_lab, p2_lab], var_name='period_label', value_name='count')
+                            # Sort for better visualization (by issue, then period)
+                            df_top_issues_for_chart = df_top_issues_for_chart.sort_values(by=['issues', 'period_label'])
+
+
+                            fig_top_issues_comp = px.bar(df_top_issues_for_chart, x='issues', y='count', color='period_label',
+                                                         barmode='group', title=f'Top {TOP_N_GENERAL_ISSUES_COMPARISON} General Issues Comparison')
+                            fig_top_issues_comp.update_xaxes(categoryorder='total descending') # Show issues with highest total count first
+                            if fig_top_issues_comp: st.plotly_chart(fig_top_issues_comp, use_container_width=True)
+                            else: st.caption(f"No data for Top {TOP_N_GENERAL_ISSUES_COMPARISON} General Issues Comparison.")
+                        else:
+                            st.caption(f"Not enough data to compare Top {TOP_N_GENERAL_ISSUES_COMPARISON} General Issues.")
+                    else:
+                        st.caption("Issues column not available for Top N General Issues Comparison.")
 
 
 st.sidebar.subheader("Downloads")
