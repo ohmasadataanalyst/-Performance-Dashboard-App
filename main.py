@@ -17,8 +17,7 @@ st.set_page_config(page_title="Performance Dashboard", layout="wide")
 # --- Helper function for normalizing project names ---
 def normalize_project_name(name):
     if pd.isna(name):
-        return "" # Handle NaN or None explicitly
-    # Lowercase, strip leading/trailing whitespace, replace multiple internal spaces with a single space
+        return ""
     return re.sub(r'\s+', ' ', str(name).lower().strip())
 
 # --- Branch Code to Standardized Name Mapping ---
@@ -37,13 +36,11 @@ BRANCH_SCHEMA = {
 }
 BRANCH_SCHEMA_NORMALIZED = {str(k).strip().upper(): v for k, v in BRANCH_SCHEMA.items()}
 
-# Original Project Frequencies (keys might have inconsistent spacing/casing)
 PROJECT_FREQUENCIES_ORIGINAL = {
     "Check all expiration date": {"type": "weekly", "weekday": 0},
     "Cheese powder SOP (in opening)": {"type": "daily"}, "Clean drive thru branches": {"type": "daily"},
-    "Clean ice maker": {"type": "daily"}, "clean shawarma cutter machine  1": {"type": "daily"}, # Note double space
-    "clean shawarma cutter machine  2": {"type": "daily"}, # Note double space
-    "Cleaning AC filters": {"type": "weekly", "weekday": 0},
+    "Clean ice maker": {"type": "daily"}, "clean shawarma cutter machine  1": {"type": "daily"},
+    "clean shawarma cutter machine  2": {"type": "daily"}, "Cleaning AC filters": {"type": "weekly", "weekday": 0},
     "Cleaning Toilet -- 2-5 am": {"type": "daily"}, "Deeply cleaning": {"type": "weekly", "weekday": 0},
     "Defrost bread to next day": {"type": "daily"}, "Government papers/الأوراق الحكومية": {"type": "weekly", "weekday": 0},
     "Open The Signboard": {"type": "daily"}, "Preparation A": {"type": "daily"},
@@ -55,11 +52,8 @@ PROJECT_FREQUENCIES_ORIGINAL = {
     "Weekly maintenance": {"type": "weekly", "weekday": 0},
     "Shawarma Classic - Opening Checklist- IRRUH NEW": {"type": "daily"},
 }
-
-# Normalized Project Frequencies and List of Names
 PROJECT_FREQUENCIES_NORMALIZED = {normalize_project_name(k): v for k, v in PROJECT_FREQUENCIES_ORIGINAL.items()}
 ALL_DEFINED_PROJECT_NAMES_NORMALIZED = list(PROJECT_FREQUENCIES_NORMALIZED.keys())
-
 
 DB_PATH = 'issues.db'
 conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
@@ -193,7 +187,8 @@ if is_admin:
             COMP_BRANCH_COL = 'branch'; COMP_TYPE_COL = 'نوع الشكوى'; COMP_PROD_COL = 'الشكوى على اي منتج؟'
             COMP_QUAL_COL = 'فى حاله كانت الشكوى جوده برجاء تحديد نوع الشكوى'; COMP_ORDER_ERR_COL = 'فى حاله خطاء فى الطلب برجاء تحديد نوع الشكوى'
             COMP_DATE_COL = 'date'
-            MISSING_PROJECT_COL = 'project'; MISSING_BRANCH_COL = 'branch'; MISSING_AM_COL = 'area manager'; MISSING_DATE_COL = 'date'
+            # For "missing" files, we now expect: project, branch (name), code (branch code), area manager, date
+            MISSING_PROJECT_COL = 'project'; MISSING_BRANCH_COL = 'branch'; MISSING_AM_COL = 'area manager'; MISSING_DATE_COL = 'date'; # EXCEL_CODE_COL is already defined
             
             req_cols_up = []
             date_col_excel = ''
@@ -209,7 +204,8 @@ if is_admin:
                 else: st.sidebar.error(f"Invalid file type '{final_ft_val}' for 'complaints'."); st.stop()
             elif norm_cat == 'missing':
                 if norm_ft == 'performance':
-                    req_cols_up = [MISSING_PROJECT_COL, MISSING_BRANCH_COL, MISSING_AM_COL, MISSING_DATE_COL]; date_col_excel = MISSING_DATE_COL
+                    # Add EXCEL_CODE_COL to required columns for missing performance files
+                    req_cols_up = [MISSING_PROJECT_COL, MISSING_BRANCH_COL, EXCEL_CODE_COL, MISSING_AM_COL, MISSING_DATE_COL]; date_col_excel = MISSING_DATE_COL
                 else: st.sidebar.error(f"Invalid file type '{final_ft_val}' for 'missing'."); st.stop()
             elif norm_cat == 'visits':
                 req_cols_up = [EXCEL_CODE_COL, STD_EXCEL_BRANCH_COL, STD_EXCEL_AM_COL, STD_EXCEL_ISSUES_COL, STD_EXCEL_DATE_COL]; date_col_excel = STD_EXCEL_DATE_COL
@@ -249,11 +245,11 @@ if is_admin:
             for _, row_data in df_to_imp.iterrows():
                 issue_dt_str = row_data['parsed_date'].strftime('%Y-%m-%d')
                 iss_val, am_val_row, shift_val_row = "N/A", "N/A", None
-                excel_branch_str = "Unknown Branch"; code_from_excel_col = ""
+                excel_branch_str = "Unknown Branch"; code_from_excel_col_direct = "" # Specifically for code read from 'code' column
 
                 if norm_cat == 'complaints' and norm_ft == 'performance':
                     excel_branch_str = str(row_data.get(COMP_BRANCH_COL, "Unk Comp Branch"))
-                    code_from_excel_col = str(row_data.get(EXCEL_CODE_COL, "")).strip()
+                    code_from_excel_col_direct = str(row_data.get(EXCEL_CODE_COL, "")).strip().upper()
                     am_val_row = "N/A - Complaints"
                     details_list = [f"Type: {str(row_data.get(COMP_TYPE_COL)).strip()}" if pd.notna(row_data.get(COMP_TYPE_COL)) else None,
                                     f"Product: {str(row_data.get(COMP_PROD_COL)).strip()}" if pd.notna(row_data.get(COMP_PROD_COL)) else None,
@@ -262,55 +258,75 @@ if is_admin:
                     iss_val = "; ".join(filter(None, details_list)) or "No specific complaint details"
                 elif norm_cat == 'cctv':
                     excel_branch_str = str(row_data.get(CCTV_BRANCH_COL, "Unk CCTV Branch"))
-                    code_from_excel_col = str(row_data.get(EXCEL_CODE_COL, "")).strip()
+                    code_from_excel_col_direct = str(row_data.get(EXCEL_CODE_COL, "")).strip().upper()
                     am_val_row = str(row_data.get(CCTV_AM_COL, "N/A"))
                     iss_val = str(row_data.get(CCTV_VIOLATION_COL, "N/A"))
                     shift_val_row = str(row_data.get(CCTV_SHIFT_COL)) if pd.notna(row_data.get(CCTV_SHIFT_COL)) else None
                 elif norm_cat == 'missing' and norm_ft == 'performance':
                     excel_branch_str = str(row_data.get(MISSING_BRANCH_COL, "Unk Missing Branch")).strip()
-                    # Apply normalization to project name during ingestion
+                    # Read the branch code directly from the EXCEL_CODE_COL ('code') for 'missing' files
+                    code_from_excel_col_direct = str(row_data.get(EXCEL_CODE_COL, "")).strip().upper()
                     iss_val = normalize_project_name(row_data.get(MISSING_PROJECT_COL, "Unk Project"))
                     am_val_row = str(row_data.get(MISSING_AM_COL, "N/A")).strip()
-                    code_from_excel_col = ""
                 elif norm_cat == 'visits': 
                     excel_branch_str = str(row_data.get(STD_EXCEL_BRANCH_COL, "Unk Visit Branch"))
-                    code_from_excel_col = str(row_data.get(EXCEL_CODE_COL, "")).strip()
+                    code_from_excel_col_direct = str(row_data.get(EXCEL_CODE_COL, "")).strip().upper()
                     am_val_row = str(row_data.get(STD_EXCEL_AM_COL, "N/A - Visits"))
                     iss_val = str(row_data.get(STD_EXCEL_ISSUES_COL, "Visit Logged"))
                 else: 
                     excel_branch_str = str(row_data.get(STD_EXCEL_BRANCH_COL, "Unk Std Branch"))
-                    code_from_excel_col = str(row_data.get(EXCEL_CODE_COL, "")).strip()
+                    code_from_excel_col_direct = str(row_data.get(EXCEL_CODE_COL, "")).strip().upper()
                     am_val_row = str(row_data.get(STD_EXCEL_AM_COL, "N/A"))
-                    iss_val = str(row_data.get(STD_EXCEL_ISSUES_COL, "N/A"))
-                    if norm_cat == 'operation-training': # Example if op-training also uses 'issues' as project names
-                        iss_val = normalize_project_name(row_data.get(STD_EXCEL_ISSUES_COL, "N/A"))
+                    iss_val_raw = row_data.get(STD_EXCEL_ISSUES_COL, "N/A")
+                    if norm_cat == 'operation-training':
+                        iss_val = normalize_project_name(iss_val_raw)
+                    else:
+                        iss_val = str(iss_val_raw)
 
 
                 std_branch_name = "Unknown Branch"; db_code_val = ""
-                norm_excel_branch_str = excel_branch_str.strip().upper()
-                extracted_code_match = re.search(r'\b([A-Z0-9]{2,5})\b(?![A-Z0-9])', norm_excel_branch_str)
-                extracted_code = extracted_code_match.group(1).upper() if extracted_code_match else None
+                norm_excel_branch_name_str = excel_branch_str.strip().upper() # From 'branch' column of Excel
+                
+                # Try to extract code from the branch name string (e.g., "B12" from "Tweek B12")
+                extracted_code_from_branch_name_match = re.search(r'\b([A-Z0-9]{2,5})\b(?![A-Z0-9])', norm_excel_branch_name_str)
+                extracted_code_from_branch_name = extracted_code_from_branch_name_match.group(1).upper() if extracted_code_from_branch_name_match else None
 
-                if extracted_code and extracted_code in BRANCH_SCHEMA_NORMALIZED:
-                    std_branch_name = BRANCH_SCHEMA_NORMALIZED[extracted_code]; db_code_val = extracted_code
-                elif code_from_excel_col and code_from_excel_col.upper() in BRANCH_SCHEMA_NORMALIZED:
-                    std_branch_name = BRANCH_SCHEMA_NORMALIZED[code_from_excel_col.upper()]; db_code_val = code_from_excel_col.upper()
+                # Mapping Priority:
+                # 1. Code from Excel's 'code' column (code_from_excel_col_direct)
+                if code_from_excel_col_direct and code_from_excel_col_direct in BRANCH_SCHEMA_NORMALIZED:
+                    std_branch_name = BRANCH_SCHEMA_NORMALIZED[code_from_excel_col_direct]
+                    db_code_val = code_from_excel_col_direct
+                # 2. Code extracted from Excel's 'branch' column string
+                elif extracted_code_from_branch_name and extracted_code_from_branch_name in BRANCH_SCHEMA_NORMALIZED:
+                    std_branch_name = BRANCH_SCHEMA_NORMALIZED[extracted_code_from_branch_name]
+                    db_code_val = extracted_code_from_branch_name
+                # 3. Match full branch name string from Excel's 'branch' column
                 else:
-                    match_found = False
+                    match_found_by_full_name = False
                     for sc_code, sc_name in BRANCH_SCHEMA_NORMALIZED.items():
-                        if norm_excel_branch_str == sc_name.upper():
-                            std_branch_name = sc_name; db_code_val = sc_code; match_found = True; break
-                    if not match_found:
-                        std_branch_name = excel_branch_str; db_code_val = code_from_excel_col
-                        unmapped_branches.add(f"{excel_branch_str} (Code: {db_code_val or 'N/A'})")
+                        if norm_excel_branch_name_str == sc_name.upper():
+                            std_branch_name = sc_name
+                            db_code_val = sc_code # This code comes from BRANCH_SCHEMA key
+                            match_found_by_full_name = True
+                            break
+                    if not match_found_by_full_name: # Fallback if no mapping found by any method
+                        std_branch_name = excel_branch_str # Use original excel branch name string for display
+                        # Determine what code was attempted for the unmapped message
+                        unmapped_code_attempt = code_from_excel_col_direct or extracted_code_from_branch_name or "N/A"
+                        db_code_val = code_from_excel_col_direct or extracted_code_from_branch_name or "" # Store the best guess or empty
+                        unmapped_branches.add(f"{excel_branch_str} (Attempted Code: {unmapped_code_attempt})")
                 
-                if not db_code_val and std_branch_name != "Unknown Branch" and std_branch_name.upper() != excel_branch_str.upper() :
-                    for sc_c, sc_n in BRANCH_SCHEMA_NORMALIZED.items():
-                        if std_branch_name.upper() == sc_n.upper(): 
-                            db_code_val = sc_c; break
+                # Final check: If std_branch_name got mapped (e.g., by full name match from schema)
+                # but db_code_val is still missing (e.g., schema value didn't include code itself, only name), try to find its code.
+                if not db_code_val and std_branch_name != "Unknown Branch" and std_branch_name != excel_branch_str:
+                    # std_branch_name is a value from BRANCH_SCHEMA. Find its key.
+                    for schema_key, schema_val_name in BRANCH_SCHEMA_NORMALIZED.items():
+                        if std_branch_name.upper() == schema_val_name.upper():
+                            db_code_val = schema_key
+                            break
                 
-                db_code_val = db_code_val or "" 
-                
+                db_code_val = db_code_val or ""  # Ensure db_code_val is not None
+
                 c.execute('''INSERT INTO issues (upload_id, code, issues, branch, area_manager, date, report_type, shift) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
                           (up_id, db_code_val, iss_val, std_branch_name, am_val_row, issue_dt_str, final_ft_val, shift_val_row))
                 inserted_count += 1
@@ -672,12 +688,8 @@ def display_complaints_performance_dashboard(df_complaints_raw, figs_container):
     st.dataframe(df_display_complaints.reset_index(drop=True), use_container_width=True)
     return figs_container
 
-# Uses PROJECT_FREQUENCIES_NORMALIZED (global)
 def get_expected_task_count(project_name_norm, start_date_obj, end_date_obj):
     if project_name_norm not in PROJECT_FREQUENCIES_NORMALIZED:
-        # This might happen if ALL_DEFINED_PROJECT_NAMES_NORMALIZED was somehow different,
-        # or if a name was passed that wasn't from that list.
-        # st.sidebar.warning(f"Task '{project_name_norm}' not in normalized frequency definitions.")
         return 0
     config = PROJECT_FREQUENCIES_NORMALIZED[project_name_norm]
     expected_count = 0
@@ -700,32 +712,31 @@ def display_missing_performance_dashboard(df_missing_raw_period_data, figs_conta
     results = []
     all_branches_to_calculate_for = sorted(list(BRANCH_SCHEMA_NORMALIZED.values())) 
 
-    # Ensure the 'issues' column in df_missing_raw_period_data is also normalized if it wasn't already at ingestion
-    # However, our strategy is to normalize at ingestion, so it should be fine.
-    # If df_missing_raw_period_data['issues'] is not normalized, you'd do it here:
-    # df_missing_raw_period_data['issues_normalized_temp'] = df_missing_raw_period_data['issues'].apply(normalize_project_name)
-    # And then use 'issues_normalized_temp' for comparison. But this is less efficient.
+    # Create a copy to ensure 'issues' column is normalized for comparison,
+    # even if it was already normalized at ingestion (belt-and-suspenders for this display function)
+    df_missing_data_for_calc = df_missing_raw_period_data.copy()
+    if 'issues' in df_missing_data_for_calc.columns:
+        df_missing_data_for_calc['issues_normalized_for_calc'] = df_missing_data_for_calc['issues'].apply(normalize_project_name)
+    else: # If 'issues' column doesn't exist, create an empty normalized one to prevent errors
+        df_missing_data_for_calc['issues_normalized_for_calc'] = ""
+
 
     for branch_name in all_branches_to_calculate_for:
         total_expected_for_branch = 0
         total_missed_for_branch = 0
         
-        # Filter for the current branch. 'branch' column in df_missing_raw_period_data should be standardized.
-        df_branch_missed_tasks = df_missing_raw_period_data[df_missing_raw_period_data['branch'] == branch_name]
-
-        # The 'issues' column in df_branch_missed_tasks should contain project names
-        # that were ALREADY NORMALIZED during the ingestion process.
+        df_branch_missed_tasks = df_missing_data_for_calc[df_missing_data_for_calc['branch'] == branch_name]
         
-        for project_name_norm in ALL_DEFINED_PROJECT_NAMES_NORMALIZED: # Iterate using globally normalized defined names
+        for project_name_norm in ALL_DEFINED_PROJECT_NAMES_NORMALIZED: 
             expected_for_project = get_expected_task_count(project_name_norm, start_date_calc, end_date_calc)
             if expected_for_project == 0: continue 
             
             total_expected_for_branch += expected_for_project
             
             missed_count_for_project = 0
-            if not df_branch_missed_tasks.empty and 'issues' in df_branch_missed_tasks.columns:
-                 # Compare the already normalized 'issues' from DB with the 'project_name_norm'
-                 missed_count_for_project = len(df_branch_missed_tasks[df_branch_missed_tasks['issues'] == project_name_norm])
+            if not df_branch_missed_tasks.empty:
+                 # Compare using the temporarily normalized 'issues_normalized_for_calc'
+                 missed_count_for_project = len(df_branch_missed_tasks[df_branch_missed_tasks['issues_normalized_for_calc'] == project_name_norm])
             
             total_missed_for_branch += missed_count_for_project
         
