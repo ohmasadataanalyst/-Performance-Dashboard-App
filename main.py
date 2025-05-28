@@ -289,7 +289,7 @@ if is_admin:
                                     f"Order Error: {str(row_data.get(COMP_ORDER_ERR_COL.lower())).strip()}" if pd.notna(row_data.get(COMP_ORDER_ERR_COL.lower())) else None]
                     iss_val = "; ".join(filter(None, details_list)) or "No specific complaint details"
                 elif norm_cat == 'complaints' and norm_ft == CLOSURE_REPORT_TYPE_NAME.lower():
-                    excel_branch_str = str(row_data.get(STD_EXCEL_BRANCH_COL.lower(), "Unk Closure Branch")) # STD_EXCEL_BRANCH_COL is 'branch'
+                    excel_branch_str = str(row_data.get(STD_EXCEL_BRANCH_COL.lower(), "Unk Closure Branch"))
                     code_from_excel_col_direct = str(row_data.get(EXCEL_CODE_COL.lower(), "")).strip().upper()
                     am_val_row = str(row_data.get(COMPLAINT_CLOSURE_EXCEL_AM_COL_NAME.lower(), "N/A"))
                     iss_val = str(row_data.get(COMPLAINT_CLOSURE_EXCEL_STATUS_COL_NAME.lower(), "N/A"))
@@ -491,15 +491,13 @@ def create_bar_chart(df_source, group_col, title_suffix="", chart_title=None, co
         else:
             if group_col in df_source.columns and sort_values_by in df_source.columns and group_col != sort_values_by:
                  data_to_plot = df_source.copy()
-                 # Ensure the y-axis (sort_values_by) is numeric for proper sorting and charting
-                 if pd.api.types.is_string_dtype(data_to_plot[sort_values_by]): # Attempt conversion if string (e.g., "95.0%")
+                 if pd.api.types.is_string_dtype(data_to_plot[sort_values_by]):
                      try:
                          data_to_plot[sort_values_by] = data_to_plot[sort_values_by].str.rstrip('%').astype(float)
-                     except: # Fallback if conversion fails, might affect sorting
+                     except:
                          pass
                  data_to_plot[group_col] = data_to_plot[group_col].astype(str)
                  fig = px.bar(data_to_plot, x=group_col, y=sort_values_by, title=final_title, template="plotly_white", color_discrete_sequence=color_sequence, color_discrete_map=color_discrete_map, text_auto=text_auto)
-                 # Only apply category order if sort_values_by is numeric after potential conversion
                  if pd.api.types.is_numeric_dtype(data_to_plot[sort_values_by]):
                     ordered_categories = data_to_plot.sort_values(by=sort_values_by, ascending=sort_ascending)[group_col].tolist()
                     fig.update_xaxes(categoryorder='array', categoryarray=ordered_categories)
@@ -836,9 +834,9 @@ def display_missing_performance_dashboard(df_missing_raw_period_data, figs_conta
 
     return figs_container, df_results_sorted
 
-# --- New Dashboard for 'اغلاق الشكاوي' ---
-# Helper function (can be defined globally or inside display_complaint_closure_dashboard)
 def _prepare_closure_summary_df(df, group_by_col):
+    # This function must be defined before display_complaint_closure_dashboard or passed to it
+    # For simplicity, keeping it global or defined just before its first use.
     summary = df.groupby([group_by_col, 'Status']).size().unstack(fill_value=0)
     summary = summary.reindex(columns=CLOSURE_STATUS_ORDER, fill_value=0)
     summary['المجموع'] = summary.sum(axis=1)
@@ -854,16 +852,14 @@ def _prepare_closure_summary_df(df, group_by_col):
         else:
             display_df[status_col] = "0 (0.0%)"
     display_df['المجموع'] = summary['المجموع'].astype(int)
-    display_df['نسبة الاكتمال (%)'] = summary['نسبة الاكتمال'] # Keep numeric for potential sorting if needed later for display
+    display_df['نسبة الاكتمال (%)'] = summary['نسبة الاكتمال'] 
     return summary, display_df
-
 
 def display_complaint_closure_dashboard(df_closure_data, figs_container, period_name="Primary Period"):
     if df_closure_data.empty:
         st.info(f"No data for Complaint Closure Analysis for {period_name}.")
-        return figs_container, None, None # Return None for summary DFs
+        return figs_container, None, None 
 
-    # 'issues' column contains the status
     df_closure_data = df_closure_data.rename(columns={'issues': 'Status'})
 
     st.header(f"تحليل اغلاق الشكاوي ({period_name})")
@@ -872,7 +868,6 @@ def display_complaint_closure_dashboard(df_closure_data, figs_container, period_
     df_managers_raw_summary, df_managers_display = _prepare_closure_summary_df(df_closure_data, 'area_manager')
     with tab_managers:
         st.subheader("إحصائيات حسب المديرين")
-        # For display, format the completion rate with %
         df_managers_display_final = df_managers_display.copy()
         df_managers_display_final['نسبة الاكتمال (%)'] = df_managers_display_final['نسبة الاكتمال (%)'].apply(lambda x: f"{x:.1f}%")
         st.dataframe(df_managers_display_final, use_container_width=True)
@@ -941,7 +936,11 @@ def display_complaint_closure_dashboard(df_closure_data, figs_container, period_
         df_low_completion_branches.sort_values('نسبة الاكتمال', ascending=True, inplace=True)
 
         if not df_low_completion_branches.empty:
-            _, df_low_comp_display = _prepare_closure_summary_df(df_closure_data[df_closure_data['branch'].isin(df_low_completion_branches.index)], 'branch')
+            # Use the _prepare_closure_summary_df to get the display version for low completion branches
+            # Filter the original df_closure_data for only these branches before passing to the summary function
+            df_low_comp_data_filtered = df_closure_data[df_closure_data['branch'].isin(df_low_completion_branches.index)]
+            _, df_low_comp_display = _prepare_closure_summary_df(df_low_comp_data_filtered, 'branch')
+            
             df_low_comp_display_final = df_low_comp_display.copy()
             df_low_comp_display_final['نسبة الاكتمال (%)'] = df_low_comp_display_final['نسبة الاكتمال (%)'].apply(lambda x: f"{x:.1f}%")
 
@@ -998,8 +997,8 @@ figs_complaints_primary = {}
 figs_missing_primary = {}
 figs_complaint_closure_primary = {}
 df_missing_perf_results_primary = pd.DataFrame()
-df_closure_managers_summary_primary = None # To store manager summary for closure
-df_closure_branches_summary_primary = None # To store branch summary for closure
+df_closure_managers_summary_primary = None 
+df_closure_branches_summary_primary = None 
 
 if not df_primary_period.empty:
     is_purely_complaints_perf = ((df_primary_period['upload_category'].astype(str).str.lower() == 'complaints').all() and \
@@ -1061,14 +1060,13 @@ if not df_primary_period.empty:
         ].copy()
         if not df_complaint_closure_subset_in_primary.empty:
             st.markdown("---");
-            temp_figs_subset_closure, _, _ = display_complaint_closure_dashboard(df_complaint_closure_subset_in_primary, {}, "Subset of Primary") # Ignore summary DFs for subset display in general
+            temp_figs_subset_closure, _, _ = display_complaint_closure_dashboard(df_complaint_closure_subset_in_primary, {}, "Subset of Primary") 
             if figs_primary is not None and temp_figs_subset_closure:
                 for key, fig_val_closure in temp_figs_subset_closure.items():
                     figs_primary[f"Subset_ComplaintClosure_{key}"] = fig_val_closure
 
 
     st.markdown("---")
-    # Only show ranking button if not purely 'اغلاق الشكاوي'
     if not is_purely_complaint_closure:
         if st.button("🏆 Show Branch Rankings (Current Filters)", key="show_rankings_button_main_display"):
             if not df_primary_period.empty and 'branch' in df_primary_period.columns:
@@ -1089,8 +1087,7 @@ if not df_primary_period.empty:
                         with rank_chart_cols[1]:
                             fig_bot = create_bar_chart(ranked_missing_df.tail(top_n).sort_values('_missing_rate_numeric',ascending=False), 'branch', chart_title=f"Bottom {top_n} (Highest Missing Rate)", sort_values_by='_missing_rate_numeric', sort_ascending=False)
                             if fig_bot: st.plotly_chart(fig_bot, use_container_width=True)
-                # Removed the 'elif is_purely_complaint_closure' block for ranking
-                else: # General ranking based on issue counts (This will apply if not purely missing or purely closure)
+                else: 
                     st.markdown("_Based on total count of issues/complaints. Lower count is better._")
                     branch_counts_df = df_primary_period.groupby('branch').size().reset_index(name='Total Issues/Complaints').sort_values(by='Total Issues/Complaints', ascending=True)
                     branch_counts_df['Rank'] = branch_counts_df['Total Issues/Complaints'].rank(method='min', ascending=True).astype(int)
@@ -1107,7 +1104,7 @@ if not df_primary_period.empty:
                             if fig_bot: st.plotly_chart(fig_bot, use_container_width=True)
             else: st.info("No data or branch information available for rankings with current filters.")
     elif is_purely_complaint_closure:
-         st.info(f"Branch ranking is not applicable for '{CLOSURE_REPORT_TYPE_NAME}' analysis.")
+         st.info(f"Branch ranking by issue count is not applicable for '{CLOSURE_REPORT_TYPE_NAME}' analysis. Completion rates are shown in the specific dashboard.")
 else:
     st.info("No data matches the current filter criteria for the primary period.")
 
@@ -1339,6 +1336,7 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
         output_excel = io.BytesIO()
         df_primary_excel_export = df_primary_period.copy()
         excel_file_suffix = "data"
+        excel_download_ready = False 
 
         if is_primary_data_purely_complaints_check:
             excel_file_suffix = "complaints_data_parsed"
@@ -1348,28 +1346,47 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
             for col_name_excel in MULTI_VALUE_COMPLAINT_COLS:
                 if col_name_excel in df_primary_excel_export.columns:
                     df_primary_excel_export[col_name_excel] = df_primary_excel_export[col_name_excel].apply(lambda x_list: ', '.join(map(str,x_list)) if isinstance(x_list, list) else x_list)
+            with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
+                df_primary_excel_export.to_excel(writer, index=False, sheet_name='PrimaryComplaintsParsed')
+            excel_data = output_excel.getvalue()
+            excel_download_ready = True
+
         elif is_primary_data_purely_missing_check and not df_missing_perf_results_primary.empty:
             excel_file_suffix = "missing_perf_summary"
             df_primary_excel_export = df_missing_perf_results_primary[['branch', 'done rate', 'missing rate']].copy()
+            with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
+                df_primary_excel_export.to_excel(writer, index=False, sheet_name='MissingPerfSummary')
+            excel_data = output_excel.getvalue()
+            excel_download_ready = True
+
         elif is_primary_data_purely_complaint_closure_check:
-            excel_file_suffix = "complaint_closure_data"
-            # For Excel, export the detailed data and then summaries if needed
+            excel_file_suffix = "complaint_closure" 
             with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
                 df_primary_period.rename(columns={'issues': 'Status'}).to_excel(writer, index=False, sheet_name='Closure_Details')
                 if df_closure_managers_summary_primary is not None:
-                    df_closure_managers_summary_primary.reset_index().to_excel(writer, index=False, sheet_name='Manager_Summary')
+                     _prepare_closure_summary_df(df_primary_period.rename(columns={'issues':'Status'}), 'area_manager')[1].reset_index().to_excel(writer, index=False, sheet_name='Manager_Summary_Closure')
                 if df_closure_branches_summary_primary is not None:
-                    df_closure_branches_summary_primary.reset_index().to_excel(writer, index=False, sheet_name='Branch_Summary')
-            excel_data = output_excel.getvalue() # This should be done once after all sheets are written
-            st.sidebar.download_button(label=f"Download Primary ({excel_file_suffix.replace('_',' ').title()}) (Excel)", data=excel_data, file_name=f"primary_{excel_file_suffix}_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_primary_{excel_file_suffix}_xlsx")
-            return # Exit here as we've handled the download button for this specific case
-        
-        # Default Excel export if not complaint_closure
-        with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
-            df_primary_excel_export.to_excel(writer, index=False, sheet_name='PrimaryData')
-        excel_data = output_excel.getvalue()
-        st.sidebar.download_button(label=f"Download Primary ({excel_file_suffix.replace('_',' ').title()}) (Excel)", data=excel_data, file_name=f"primary_{excel_file_suffix}_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_primary_{excel_file_suffix}_xlsx")
-    except Exception as e: st.sidebar.error(f"Primary Excel Error: {e}")
+                    _prepare_closure_summary_df(df_primary_period.rename(columns={'issues':'Status'}), 'branch')[1].reset_index().to_excel(writer, index=False, sheet_name='Branch_Summary_Closure')
+            excel_data = output_excel.getvalue()
+            excel_download_ready = True
+        else: 
+            excel_file_suffix = "general_data"
+            with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
+                df_primary_excel_export.to_excel(writer, index=False, sheet_name='PrimaryGeneralData')
+            excel_data = output_excel.getvalue()
+            excel_download_ready = True
+
+        if excel_download_ready:
+            st.sidebar.download_button(
+                label=f"Download Primary ({excel_file_suffix.replace('_',' ').title()}) (Excel)",
+                data=excel_data,
+                file_name=f"primary_{excel_file_suffix}_{primary_date_range[0]:%Y%m%d}-{primary_date_range[1]:%Y%m%d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"dl_primary_{excel_file_suffix}_xlsx"
+            )
+    except Exception as e:
+        st.sidebar.error(f"Primary Excel Error: {e}")
+
 
     active_pdf_visuals_type_key = "general_visuals"
     current_figs_for_pdf = figs_primary.copy()
@@ -1489,25 +1506,25 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                     html_table_content_for_pdf = f"<h2>Summary by Managers</h2>"
 
                     if df_closure_managers_summary_primary is not None:
-                        # Format completion rate for PDF display
-                        df_managers_pdf_display = _prepare_closure_summary_df(df_pdf_final_table.rename(columns={'Status':'issues'}), 'area_manager')[1]
-                        df_managers_pdf_display['نسبة الاكتمال (%)'] = df_managers_pdf_display['نسبة الاكتمال (%)'].apply(lambda x: f"{x:.1f}%")
-                        html_table_content_for_pdf += df_managers_pdf_display.reset_index().to_html(index=False, classes="dataframe", border=0)
+                        _, manager_disp_df_pdf = _prepare_closure_summary_df(df_pdf_final_table.rename(columns={'issues':'Status'}), 'area_manager')
+                        manager_disp_df_pdf['نسبة الاكتمال (%)'] = manager_disp_df_pdf['نسبة الاكتمال (%)'].apply(lambda x: f"{x:.1f}%")
+                        html_table_content_for_pdf += manager_disp_df_pdf.reset_index().to_html(index=False, classes="dataframe", border=0)
                     else: html_table_content_for_pdf += "<p>No manager summary data.</p>"
 
 
                     html_table_content_for_pdf += f"<h2>Summary by Branches</h2>"
                     if df_closure_branches_summary_primary is not None:
-                        df_branches_pdf_display = _prepare_closure_summary_df(df_pdf_final_table.rename(columns={'Status':'issues'}), 'branch')[1]
-                        df_branches_pdf_display['نسبة الاكتمال (%)'] = df_branches_pdf_display['نسبة الاكتمال (%)'].apply(lambda x: f"{x:.1f}%")
-                        html_table_content_for_pdf += df_branches_pdf_display.sort_values("المجموع", ascending=False).reset_index().to_html(index=False, classes="dataframe", border=0)
+                        _, branch_disp_df_pdf = _prepare_closure_summary_df(df_pdf_final_table.rename(columns={'issues':'Status'}), 'branch')
+                        branch_disp_df_pdf['نسبة الاكتمال (%)'] = branch_disp_df_pdf['نسبة الاكتمال (%)'].apply(lambda x: f"{x:.1f}%")
+                        html_table_content_for_pdf += branch_disp_df_pdf.sort_values("المجموع", ascending=False).reset_index().to_html(index=False, classes="dataframe", border=0)
                     else: html_table_content_for_pdf += "<p>No branch summary data.</p>"
 
 
                     if 'closure_low_completion_table_df' in figs_complaint_closure_primary:
                         low_comp_df_pdf_raw = figs_complaint_closure_primary['closure_low_completion_table_df']
-                        # Use _prepare_closure_summary_df to get the display version for low completion branches
-                        _, df_low_comp_display_pdf = _prepare_closure_summary_df(df_pdf_final_table[df_pdf_final_table['branch'].isin(low_comp_df_pdf_raw.index)].rename(columns={'Status':'issues'}), 'branch')
+                        df_low_comp_data_filtered_pdf = df_pdf_final_table[df_pdf_final_table['branch'].isin(low_comp_df_pdf_raw.index)].rename(columns={'issues':'Status'})
+                        _, df_low_comp_display_pdf = _prepare_closure_summary_df(df_low_comp_data_filtered_pdf, 'branch')
+                        
                         df_low_comp_display_pdf['نسبة الاكتمال (%)'] = df_low_comp_display_pdf['نسبة الاكتمال (%)'].apply(lambda x: f"{x:.1f}%")
                         df_low_comp_display_pdf.index.name = "الفرع"
 
