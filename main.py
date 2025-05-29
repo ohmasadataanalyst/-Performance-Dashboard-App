@@ -561,9 +561,14 @@ def display_general_dashboard(df_data, figs_container):
         else: st.caption("No data for Report Type chart.")
 
     with chart_cols[1]:
-        figs_container['Area_Manager'] = create_pie_chart(df_data, 'area_manager', '(Primary)')
+        # Filter out 'اغلاق الشكاوي' for the Area Manager pie chart in the general dashboard
+        df_am_pie_data = df_data.copy()
+        if 'report_type' in df_am_pie_data.columns:
+            df_am_pie_data = df_am_pie_data[df_am_pie_data['report_type'] != CLOSURE_REPORT_TYPE_NAME]
+        
+        figs_container['Area_Manager'] = create_pie_chart(df_am_pie_data, 'area_manager', '(Primary)')
         if figs_container.get('Area_Manager'): st.plotly_chart(figs_container['Area_Manager'], use_container_width=True)
-        else: st.caption("No data for Area Manager chart.")
+        else: st.caption("No data for Area Manager chart (after filtering).")
 
         figs_container['Category'] = create_bar_chart(df_data, 'upload_category', '(Primary)')
         if figs_container.get('Category'): st.plotly_chart(figs_container['Category'], use_container_width=True)
@@ -750,7 +755,6 @@ def display_missing_performance_dashboard(df_missing_raw_period_data, figs_conta
 
     start_date_calc, end_date_calc = date_range_for_calc[0], date_range_for_calc[1]
     results = []
-    # FIX: Use set() to ensure unique branch names for iteration
     all_branches_to_calculate_for = sorted(list(set(BRANCH_SCHEMA_NORMALIZED.values())))
 
 
@@ -1426,8 +1430,11 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                     ordered_keys_for_pdf = [k for k,v in current_figs_for_pdf.items() if isinstance(v, go.Figure)]
                 elif active_pdf_visuals_type_key == "complaint_closure_visuals_primary":
                     ordered_keys_for_pdf = ['closure_managers_chart', 'closure_branches_chart', 'closure_low_completion_chart']
-                else:
+                else: # General or Combined
                     gen_order = ["Branch_Issues", "Area_Manager", "Report_Type", "Category", "Shift_Values", "Trend"]
+                    # For combined, Area_Manager needs to use the filtered data source if it's to exclude closure data.
+                    # The current_figs_for_pdf['Area_Manager'] would already be generated with the filter if this is a general view.
+                    
                     sub_compl_order = [f"Subset_Complaints_{k}" for k in ["Complaint_Type", "Product_Complained_About", "Quality_Issue_Detail", "Order_Error_Detail", "Complaints_by_Branch", "Complaints_Trend"]]
                     sub_miss_order = [k for k in current_figs_for_pdf if k.startswith("Subset_Missing_") and isinstance(current_figs_for_pdf.get(k), go.Figure)]
                     sub_closure_order = [k for k in current_figs_for_pdf if k.startswith("Subset_ComplaintClosure_") and isinstance(current_figs_for_pdf.get(k), go.Figure)]
@@ -1532,18 +1539,20 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
 
                         html_table_content_for_pdf += f"<h2>Branches with &lt; 50% Completion</h2>"
                         html_table_content_for_pdf += df_low_comp_display_pdf.reset_index().to_html(index=False, classes="dataframe", border=0)
-                else:
-                    if 'shift' in df_pdf_final_table.columns and df_pdf_final_table['shift'].notna().any(): pdf_table_cols_display.append('shift')
-                    if 'upload_category' in df_pdf_final_table.columns and 'report_type' in df_pdf_final_table.columns:
-                        cond_pdf_table = (df_pdf_final_table['report_type'].astype(str).str.lower()=='issues') & (df_pdf_final_table['upload_category'].astype(str).str.lower()=='cctv')
-                        df_pdf_final_table.loc[cond_pdf_table,'report_type'] = 'CCTV issues'
-
-                if not html_table_content_for_pdf:
-                    pdf_table_cols_exist_final = [col for col in pdf_table_cols_display if col in df_pdf_final_table.columns]
-                    df_pdf_to_render_final = df_pdf_final_table[pdf_table_cols_exist_final].copy()
+                else: # General data for PDF table
+                    df_pdf_final_table_general = df_pdf_final_table[df_pdf_final_table['report_type'] != CLOSURE_REPORT_TYPE_NAME].copy() # Exclude closure data
+                    
+                    if 'shift' in df_pdf_final_table_general.columns and df_pdf_final_table_general['shift'].notna().any(): pdf_table_cols_display.append('shift')
+                    if 'upload_category' in df_pdf_final_table_general.columns and 'report_type' in df_pdf_final_table_general.columns:
+                        cond_pdf_table = (df_pdf_final_table_general['report_type'].astype(str).str.lower()=='issues') & (df_pdf_final_table_general['upload_category'].astype(str).str.lower()=='cctv')
+                        df_pdf_final_table_general.loc[cond_pdf_table,'report_type'] = 'CCTV issues'
+                    
+                    pdf_table_cols_exist_final = [col for col in pdf_table_cols_display if col in df_pdf_final_table_general.columns]
+                    df_pdf_to_render_final = df_pdf_final_table_general[pdf_table_cols_exist_final].copy()
                     if 'date' in df_pdf_to_render_final.columns and pd.api.types.is_datetime64_any_dtype(df_pdf_to_render_final['date']):
                         df_pdf_to_render_final['date'] = df_pdf_to_render_final['date'].dt.strftime('%Y-%m-%d')
                     html_table_content_for_pdf = df_pdf_to_render_final.to_html(index=False, classes="dataframe", border=0)
+                    df_pdf_final_table = df_pdf_final_table_general # Update for record count text
 
                 html_full_for_table_pdf = f"<head><meta charset='utf-8'><title>Data Table Report</title><style>body{{font-family:Arial,sans-serif;margin:20px}}h1,h2{{text-align:center;color:#333;page-break-after:avoid}}table{{border-collapse:collapse;width:100%;margin-top:15px;font-size:0.8em;page-break-inside:auto}}tr{{page-break-inside:avoid;page-break-after:auto}}th,td{{border:1px solid #ddd;padding:6px;text-align:left;word-wrap:break-word}}th{{background-color:#f2f2f2}}.dataframe tbody tr:nth-of-type(even){{background-color:#f9f9f9}}@media print{{*{{-webkit-print-color-adjust:exact !important;color-adjust:exact !important;print-color-adjust:exact !important}}body{{background-color:white !important}}}}ul{{list-style-type:disc;padding-left:20px}}</style></head><body>"
                 html_full_for_table_pdf += f"<h1>{pdf_table_title_suffix} Report</h1><h2>Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}</h2>"
@@ -1561,7 +1570,7 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                             percentage_pdf = (row_pdf['count'] / total_records_closure * 100) if total_records_closure > 0 else 0
                             record_count_text += f"<li>{status_pdf}: {row_pdf['count']} ({percentage_pdf:.1f}%)</li>"
                         record_count_text += "</ul>"
-                elif not df_pdf_final_table.empty:
+                elif not df_pdf_final_table.empty: # This will now use the potentially filtered df_pdf_final_table for general data
                      record_count_text = f"<p><strong>Total Records in Table:</strong> {len(df_pdf_final_table)}</p>"
                 html_full_for_table_pdf += record_count_text
                 html_full_for_table_pdf += html_table_content_for_pdf + "</body></html>"
