@@ -750,7 +750,9 @@ def display_missing_performance_dashboard(df_missing_raw_period_data, figs_conta
 
     start_date_calc, end_date_calc = date_range_for_calc[0], date_range_for_calc[1]
     results = []
-    all_branches_to_calculate_for = sorted(list(BRANCH_SCHEMA_NORMALIZED.values()))
+    # FIX: Use set() to ensure unique branch names for iteration
+    all_branches_to_calculate_for = sorted(list(set(BRANCH_SCHEMA_NORMALIZED.values())))
+
 
     df_missing_data_for_calc = df_missing_raw_period_data.copy()
     if 'issues' in df_missing_data_for_calc.columns:
