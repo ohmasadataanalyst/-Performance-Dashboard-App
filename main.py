@@ -543,104 +543,95 @@ def parse_complaint_details(issue_string):
     return pd.Series(details)
 
 def display_general_dashboard(df_data, figs_container):
-    if df_data.empty: st.info("No data available for general performance analysis with current filters."); return figs_container
+    if df_data.empty: 
+        st.info("No data available for general performance analysis with current filters.")
+        figs_container['_df_general_filtered_for_viz'] = pd.DataFrame(columns=df_data.columns) # Ensure key exists
+        return figs_container
+        
     chart_cols = st.columns(2)
     
     # --- Prepare data specifically for the General AM Pie Chart and General Branch Rankings/Tables ---
-    # This data should exclude Complaint Closure and Complaints Performance
     df_general_filtered_for_viz = df_data.copy()
     if not df_general_filtered_for_viz.empty:
-        # Create temporary columns for robust string comparison
         df_general_filtered_for_viz['temp_report_type_lower'] = df_general_filtered_for_viz['report_type'].astype(str).str.strip().str.lower()
         df_general_filtered_for_viz['temp_upload_category_lower'] = df_general_filtered_for_viz['upload_category'].astype(str).str.strip().str.lower()
         
         closure_report_type_name_lower = CLOSURE_REPORT_TYPE_NAME.strip().lower()
 
-        # Condition to identify Complaint Closure records
         condition_closure = (df_general_filtered_for_viz['temp_report_type_lower'] == closure_report_type_name_lower)
-        
-        # Condition to identify Complaints Performance records
         condition_complaints_perf = (
             (df_general_filtered_for_viz['temp_upload_category_lower'] == 'complaints') &
             (df_general_filtered_for_viz['temp_report_type_lower'] == 'performance')
         )
         
-        # Filter out these records
         df_general_filtered_for_viz = df_general_filtered_for_viz[~(condition_closure | condition_complaints_perf)]
-        
-        # Drop temporary columns
         df_general_filtered_for_viz = df_general_filtered_for_viz.drop(columns=['temp_report_type_lower', 'temp_upload_category_lower'], errors='ignore')
-    # --- End of specific filtering for general AM pie chart ---
-
+    
+    figs_container['_df_general_filtered_for_viz'] = df_general_filtered_for_viz # Store for potential use in ranking
 
     with chart_cols[0]:
-        # Branch Issues chart can use the original df_data for this dashboard (as it's a general dashboard)
-        figs_container['Branch_Issues'] = create_bar_chart(df_data, 'branch', '(Primary)')
+        figs_container['Branch_Issues'] = create_bar_chart(df_general_filtered_for_viz, 'branch', '(Primary - General)') # Use filtered data
         if figs_container.get('Branch_Issues'): st.plotly_chart(figs_container['Branch_Issues'], use_container_width=True)
-        else: st.caption("No data for Branch chart.")
+        else: st.caption("No data for General Branch chart.")
 
-        df_report_type_viz = df_data.copy() # Use original df_data for this specific chart
-        if 'upload_category' in df_report_type_viz.columns and 'report_type' in df_report_type_viz.columns:
-            condition = (df_report_type_viz['report_type'].astype(str).str.lower() == 'issues') & \
-                        (df_report_type_viz['upload_category'].astype(str).str.lower() == 'cctv')
-            df_report_type_viz.loc[condition, 'report_type'] = 'CCTV issues'
+        df_report_type_viz_gen = df_general_filtered_for_viz.copy() # Use filtered data
+        if 'upload_category' in df_report_type_viz_gen.columns and 'report_type' in df_report_type_viz_gen.columns:
+            condition_cctv_gen = (df_report_type_viz_gen['report_type'].astype(str).str.lower() == 'issues') & \
+                                 (df_report_type_viz_gen['upload_category'].astype(str).str.lower() == 'cctv')
+            df_report_type_viz_gen.loc[condition_cctv_gen, 'report_type'] = 'CCTV issues'
 
-        figs_container['Report_Type'] = create_bar_chart(df_report_type_viz, 'report_type', '(Primary)')
+        figs_container['Report_Type'] = create_bar_chart(df_report_type_viz_gen, 'report_type', '(Primary - General)')
         if figs_container.get('Report_Type'): st.plotly_chart(figs_container['Report_Type'], use_container_width=True)
-        else: st.caption("No data for Report Type chart.")
+        else: st.caption("No data for General Report Type chart.")
 
     with chart_cols[1]:
-        # Use the specifically filtered data for the Area Manager pie chart
-        figs_container['Area_Manager'] = create_pie_chart(df_general_filtered_for_viz, 'area_manager', '(Primary)')
+        figs_container['Area_Manager'] = create_pie_chart(df_general_filtered_for_viz, 'area_manager', '(Primary - General)')
         if figs_container.get('Area_Manager'): 
             st.plotly_chart(figs_container['Area_Manager'], use_container_width=True)
         else: 
-            st.caption("No data for Area Manager chart (after excluding closure & complaints perf).")
+            st.caption("No data for General Area Manager chart.")
 
-        # Category chart can use the original df_data for this dashboard
-        figs_container['Category'] = create_bar_chart(df_data, 'upload_category', '(Primary)')
+        figs_container['Category'] = create_bar_chart(df_general_filtered_for_viz, 'upload_category', '(Primary - General)') # Use filtered
         if figs_container.get('Category'): st.plotly_chart(figs_container['Category'], use_container_width=True)
-        else: st.caption("No data for Category chart.")
+        else: st.caption("No data for General Category chart.")
 
-    if 'shift' in df_data.columns and df_data['shift'].notna().any():
-        df_shift_data = df_data[df_data['shift'].notna() & (df_data['shift'].astype(str).str.strip() != '')].copy()
-        if not df_shift_data.empty:
+    if 'shift' in df_general_filtered_for_viz.columns and df_general_filtered_for_viz['shift'].notna().any():
+        df_shift_data_gen = df_general_filtered_for_viz[df_general_filtered_for_viz['shift'].notna() & (df_general_filtered_for_viz['shift'].astype(str).str.strip() != '')].copy()
+        if not df_shift_data_gen.empty:
             with st.container():
-                figs_container['Shift_Values'] = create_bar_chart(df_shift_data, 'shift', '(Primary - CCTV Shift Times)')
+                figs_container['Shift_Values'] = create_bar_chart(df_shift_data_gen, 'shift', '(Primary - General CCTV Shift Times)')
                 if figs_container.get('Shift_Values'): st.plotly_chart(figs_container['Shift_Values'], use_container_width=True)
-                else: st.caption("No valid shift data to display.")
+                else: st.caption("No valid general shift data to display.")
 
-    if 'date' in df_data.columns and pd.api.types.is_datetime64_any_dtype(df_data['date']) and not df_data['date'].isnull().all():
-        # Trend chart uses df_general_filtered_for_viz to reflect only general issues trend
-        trend_data_primary = df_general_filtered_for_viz.groupby(df_general_filtered_for_viz['date'].dt.date).size().reset_index(name='daily_issues')
-        trend_data_primary['date'] = pd.to_datetime(trend_data_primary['date'])
-        trend_data_primary = trend_data_primary.sort_values('date')
-        if not trend_data_primary.empty:
-            window_size = min(7, len(trend_data_primary)); window_size = max(2,window_size)
-            trend_data_primary[f'{window_size}-Day MA'] = trend_data_primary['daily_issues'].rolling(window=window_size, center=True, min_periods=1).mean().round(1)
+    if 'date' in df_general_filtered_for_viz.columns and pd.api.types.is_datetime64_any_dtype(df_general_filtered_for_viz['date']) and not df_general_filtered_for_viz['date'].isnull().all():
+        trend_data_primary_gen = df_general_filtered_for_viz.groupby(df_general_filtered_for_viz['date'].dt.date).size().reset_index(name='daily_issues')
+        trend_data_primary_gen['date'] = pd.to_datetime(trend_data_primary_gen['date'])
+        trend_data_primary_gen = trend_data_primary_gen.sort_values('date')
+        if not trend_data_primary_gen.empty:
+            window_size = min(7, len(trend_data_primary_gen)); window_size = max(2,window_size)
+            trend_data_primary_gen[f'{window_size}-Day MA'] = trend_data_primary_gen['daily_issues'].rolling(window=window_size, center=True, min_periods=1).mean().round(1)
 
-            fig_trend = go.Figure()
-            fig_trend.add_trace(go.Bar(
-                x=trend_data_primary['date'], y=trend_data_primary['daily_issues'],
-                name='Daily General Issues', marker_color='lightblue', # Clarified name
+            fig_trend_gen = go.Figure()
+            fig_trend_gen.add_trace(go.Bar(
+                x=trend_data_primary_gen['date'], y=trend_data_primary_gen['daily_issues'],
+                name='Daily General Issues', 
                 hovertemplate="<b>%{x|%A, %b %d}</b><br>Issues: %{y}<extra></extra>"
             ))
-            fig_trend.add_trace(go.Scatter(
-                x=trend_data_primary['date'], y=trend_data_primary[f'{window_size}-Day MA'],
+            fig_trend_gen.add_trace(go.Scatter(
+                x=trend_data_primary_gen['date'], y=trend_data_primary_gen[f'{window_size}-Day MA'],
                 name=f'{window_size}-Day Moving Avg.', mode='lines+markers',
                 line=dict(color='royalblue', width=2), marker=dict(size=5),
                 hovertemplate="<b>%{x|%A, %b %d}</b><br>Moving Avg: %{y:.1f}<extra></extra>"
             ))
-            fig_trend.update_layout(
+            fig_trend_gen.update_layout(
                 title_text='General Issues Trend (Primary Period - Excl. Closure & Complaints Perf.)',
                 xaxis_title='Date', yaxis_title='Number of General Issues',
                 template="plotly_white", hovermode="x unified", legend_title_text='Metric'
             )
-            figs_container['Trend'] = fig_trend
+            figs_container['Trend'] = fig_trend_gen
             if figs_container.get('Trend'): st.plotly_chart(figs_container['Trend'], use_container_width=True)
         else: st.caption("No data for general issues trend analysis.")
     
-    # Detailed records should also reflect the filtered general data view
     if len(df_general_filtered_for_viz) < 50 or (primary_date_range and primary_date_range[0] == primary_date_range[1]):
         st.subheader("Detailed General Records (Primary Period - Filtered for General View)")
         display_columns = ['date', 'branch', 'report_type', 'upload_category', 'issues', 'area_manager', 'code']
@@ -675,8 +666,6 @@ def display_general_dashboard(df_data, figs_container):
         else: st.info("No non-empty issue descriptions for 'Top General Issues' (Primary).")
     else: st.info("Issue descriptions column ('issues') not available or empty for Top General Issues.")
     
-    # Store the correctly filtered data for potential use in rankings if this function's output is used
-    figs_container['_df_general_filtered_for_viz'] = df_general_filtered_for_viz 
     return figs_container
 
 def display_complaints_performance_dashboard(df_complaints_raw, figs_container):
@@ -1042,6 +1031,7 @@ figs_complaint_closure_primary = {}
 df_missing_perf_results_primary = pd.DataFrame()
 df_closure_managers_summary_primary = None 
 df_closure_branches_summary_primary = None 
+df_general_filtered_main_view = pd.DataFrame() # Initialize here
 
 if not df_primary_period.empty:
     is_purely_complaints_perf = ((df_primary_period['upload_category'].astype(str).str.lower() == 'complaints').all() and \
@@ -1071,11 +1061,8 @@ if not df_primary_period.empty:
         )
     else:
         st.subheader("General Performance Analysis (Primary Period)")
-        # display_general_dashboard now internally filters for its AM pie chart
         figs_primary = display_general_dashboard(df_primary_period.copy(), figs_primary)
-        
-        # Get the specially filtered general data if available (used for rankings below)
-        df_general_filtered_main_view = figs_primary.get('_df_general_filtered_for_viz', pd.DataFrame())
+        df_general_filtered_main_view = figs_primary.get('_df_general_filtered_for_viz', pd.DataFrame(columns=df_primary_period.columns))
 
 
         df_complaints_subset_in_primary = df_primary_period[
@@ -1117,8 +1104,7 @@ if not df_primary_period.empty:
     st.markdown("---")
     if not is_purely_complaint_closure:
         if st.button("🏆 Show Branch Rankings (Current Filters)", key="show_rankings_button_main_display"):
-            df_for_ranking = df_primary_period.copy() # Default to all primary data
-
+            
             if is_purely_missing_perf and not df_missing_perf_results_primary.empty:
                 st.markdown("_Based on 'Missing Rate'. Lower is better._")
                 ranked_missing_df = df_missing_perf_results_primary.sort_values(by='_missing_rate_numeric', ascending=True).copy()
@@ -1134,27 +1120,25 @@ if not df_primary_period.empty:
                         fig_bot = create_bar_chart(ranked_missing_df.tail(top_n).sort_values('_missing_rate_numeric',ascending=False), 'branch', chart_title=f"Bottom {top_n} (Highest Missing Rate)", sort_values_by='_missing_rate_numeric', sort_ascending=False)
                         if fig_bot: st.plotly_chart(fig_bot, use_container_width=True)
             
-            elif not is_purely_complaints_perf and not is_purely_missing_perf : # General case or mixed
+            elif is_purely_complaints_perf and not df_primary_period.empty:
+                st.markdown("_Based on total count of complaints. Lower count is better._")
+                branch_counts_df_compl = df_primary_period.groupby('branch').size().reset_index(name='Total Complaints').sort_values(by='Total Complaints', ascending=True)
+                branch_counts_df_compl['Rank'] = branch_counts_df_compl['Total Complaints'].rank(method='min', ascending=True).astype(int)
+                st.dataframe(branch_counts_df_compl[['Rank', 'branch', 'Total Complaints']].reset_index(drop=True), use_container_width=True)
+                if len(branch_counts_df_compl) > 1:
+                    rank_chart_cols_compl = st.columns(2)
+                    top_n_compl = min(10, len(branch_counts_df_compl))
+                    with rank_chart_cols_compl[0]:
+                        fig_top_compl = create_bar_chart(branch_counts_df_compl.head(top_n_compl), 'branch', chart_title=f"Top {top_n_compl} (Best - Fewest Complaints)", sort_values_by='Total Complaints', sort_ascending=True)
+                        if fig_top_compl: st.plotly_chart(fig_top_compl, use_container_width=True)
+                    with rank_chart_cols_compl[1]:
+                        fig_bot_compl = create_bar_chart(branch_counts_df_compl.tail(top_n_compl).sort_values('Total Complaints',ascending=False), 'branch', chart_title=f"Bottom {top_n_compl} (Needs Improvement - Most Complaints)", sort_values_by='Total Complaints', sort_ascending=False)
+                        if fig_bot_compl: st.plotly_chart(fig_bot_compl, use_container_width=True)
+
+            else: # General case or mixed - use the filtered general data
                 st.markdown("_Based on total count of general issues/observations (excluding complaint closure & performance). Lower count is better._")
-                # Use the df_general_filtered_main_view if available from display_general_dashboard
-                df_rank_data_source = df_general_filtered_main_view if not df_general_filtered_main_view.empty else df_primary_period.copy()
+                df_rank_data_source = df_general_filtered_main_view if not df_general_filtered_main_view.empty else pd.DataFrame()
                 
-                # Apply robust filtering if df_general_filtered_main_view was not populated (e.g. if display_general_dashboard wasn't the primary display)
-                if '_df_general_filtered_for_viz' not in figs_primary: # Indicates display_general_dashboard wasn't the main path
-                    df_temp_rank_filter = df_rank_data_source.copy()
-                    df_temp_rank_filter['temp_report_type_lower_rank'] = df_temp_rank_filter['report_type'].astype(str).str.strip().str.lower()
-                    df_temp_rank_filter['temp_upload_category_lower_rank'] = df_temp_rank_filter['upload_category'].astype(str).str.strip().str.lower()
-                    closure_report_type_name_lower_rank = CLOSURE_REPORT_TYPE_NAME.strip().lower()
-                    
-                    condition_closure_rank = (df_temp_rank_filter['temp_report_type_lower_rank'] == closure_report_type_name_lower_rank)
-                    condition_complaints_perf_rank = (
-                        (df_temp_rank_filter['temp_upload_category_lower_rank'] == 'complaints') &
-                        (df_temp_rank_filter['temp_report_type_lower_rank'] == 'performance')
-                    )
-                    df_rank_data_source = df_temp_rank_filter[~(condition_closure_rank | condition_complaints_perf_rank)]
-                    df_rank_data_source = df_rank_data_source.drop(columns=['temp_report_type_lower_rank', 'temp_upload_category_lower_rank'], errors='ignore')
-
-
                 if not df_rank_data_source.empty and 'branch' in df_rank_data_source.columns:
                     branch_counts_df = df_rank_data_source.groupby('branch').size().reset_index(name='Total General Issues').sort_values(by='Total General Issues', ascending=True)
                     branch_counts_df['Rank'] = branch_counts_df['Total General Issues'].rank(method='min', ascending=True).astype(int)
@@ -1172,18 +1156,6 @@ if not df_primary_period.empty:
                 else:
                     st.info("No general issues data available for rankings after filtering.")
             
-            elif is_purely_complaints_perf: # Only complaints performance data
-                st.markdown("_Based on total count of complaints. Lower count is better._")
-                branch_counts_df = df_primary_period.groupby('branch').size().reset_index(name='Total Complaints').sort_values(by='Total Complaints', ascending=True)
-                branch_counts_df['Rank'] = branch_counts_df['Total Complaints'].rank(method='min', ascending=True).astype(int)
-                st.dataframe(branch_counts_df[['Rank', 'branch', 'Total Complaints']].reset_index(drop=True), use_container_width=True)
-                if len(branch_counts_df) > 1:
-                    rank_chart_cols = st.columns(2)
-                    top_n = min(10, len(branch_counts_df))
-                    # ... (charts for top/bottom complaints by branch) ...
-            
-            else: 
-                st.info("No data or branch information available for rankings with current filters.")
     elif is_purely_complaint_closure:
          st.info(f"Branch ranking by issue count is not applicable for '{CLOSURE_REPORT_TYPE_NAME}' analysis. Completion rates are shown in the specific dashboard.")
 else:
@@ -1472,20 +1444,7 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
             excel_download_ready = True
         else: 
             excel_file_suffix = "general_data_filtered"
-            df_excel_export_general = df_primary_excel_export.copy()
-            # Apply the same robust filtering for Excel export as for the general AM pie chart
-            if not df_excel_export_general.empty:
-                df_excel_export_general['temp_report_type_lower_excel'] = df_excel_export_general['report_type'].astype(str).str.strip().str.lower()
-                df_excel_export_general['temp_upload_category_lower_excel'] = df_excel_export_general['upload_category'].astype(str).str.strip().str.lower()
-                closure_report_type_name_lower_excel = CLOSURE_REPORT_TYPE_NAME.strip().lower()
-
-                condition_closure_excel = (df_excel_export_general['temp_report_type_lower_excel'] == closure_report_type_name_lower_excel)
-                condition_complaints_perf_excel = (
-                    (df_excel_export_general['temp_upload_category_lower_excel'] == 'complaints') &
-                    (df_excel_export_general['temp_report_type_lower_excel'] == 'performance')
-                )
-                df_excel_export_general = df_excel_export_general[~(condition_closure_excel | condition_complaints_perf_excel)]
-                df_excel_export_general = df_excel_export_general.drop(columns=['temp_report_type_lower_excel', 'temp_upload_category_lower_excel'], errors='ignore')
+            df_excel_export_general = df_general_filtered_main_view.copy() # Use the already filtered data
 
             with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
                 df_excel_export_general.to_excel(writer, index=False, sheet_name='PrimaryGeneralFiltered')
@@ -1505,7 +1464,7 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
 
 
     active_pdf_visuals_type_key = "general_visuals"
-    current_figs_for_pdf = figs_primary.copy() # This will contain the filtered AM chart if general view
+    current_figs_for_pdf = figs_primary.copy() 
     pdf_visual_button_label = "Prepare General Visuals PDF"
 
     if is_primary_data_purely_complaints_check:
@@ -1526,7 +1485,7 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
 
     if st.sidebar.button(pdf_visual_button_label, key=f"prep_{active_pdf_visuals_type_key}_pdf"):
         if not wk_path or wk_path == "not found": st.sidebar.error("wkhtmltopdf path not set.")
-        elif not current_figs_for_pdf or not any(isinstance(fig, go.Figure) for fig_name, fig in current_figs_for_pdf.items() if fig_name != '_df_general_filtered_for_viz'): # Exclude helper df
+        elif not current_figs_for_pdf or not any(isinstance(fig, go.Figure) for fig_name, fig in current_figs_for_pdf.items() if fig_name != '_df_general_filtered_for_viz'): 
              st.sidebar.warning("No chart visuals to generate PDF for this selection.")
         else:
             with st.spinner("Generating Visuals PDF..."):
@@ -1541,7 +1500,7 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                     ordered_keys_for_pdf = [k for k,v in current_figs_for_pdf.items() if isinstance(v, go.Figure) and k != '_df_general_filtered_for_viz']
                 elif active_pdf_visuals_type_key == "complaint_closure_visuals_primary":
                     ordered_keys_for_pdf = ['closure_managers_chart', 'closure_branches_chart', 'closure_low_completion_chart']
-                else: # General or Combined
+                else: 
                     gen_order = ["Branch_Issues", "Area_Manager", "Report_Type", "Category", "Shift_Values", "Trend"]
                     
                     sub_compl_order = [f"Subset_Complaints_{k}" for k in ["Complaint_Type", "Product_Complained_About", "Quality_Issue_Detail", "Order_Error_Detail", "Complaints_by_Branch", "Complaints_Trend"]]
@@ -1586,7 +1545,7 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                 pdf_table_title_suffix = "Data"; html_table_content_for_pdf = ""
                 pdf_table_cols_display = ['date','branch','report_type','upload_category','issues','area_manager','code']
                 
-                df_for_pdf_table_render = pd.DataFrame() # This will hold the final df for rendering
+                df_for_pdf_table_render = pd.DataFrame() 
 
                 if is_primary_data_purely_complaints_check:
                     pdf_table_title_suffix = "Complaints Performance Data"
@@ -1597,15 +1556,25 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                     for col_pdf_multi in MULTI_VALUE_COMPLAINT_COLS:
                         if col_pdf_multi in df_for_pdf_table_render.columns:
                             df_for_pdf_table_render[col_pdf_multi] = df_for_pdf_table_render[col_pdf_multi].apply(lambda x_list: ', '.join(map(str,x_list)) if isinstance(x_list, list) else x_list)
-                    html_table_content_for_pdf = df_for_pdf_table_render[pdf_table_cols_display].to_html(index=False, classes="dataframe", border=0)
+                    
+                    final_cols_for_html = [col for col in pdf_table_cols_display if col in df_for_pdf_table_render.columns]
+                    html_table_content_for_pdf = df_for_pdf_table_render[final_cols_for_html].to_html(index=False, classes="dataframe", border=0)
 
 
                 elif is_primary_data_purely_missing_check and not df_missing_perf_results_primary.empty:
                     pdf_table_title_suffix = "Missing Performance Summary"
                     df_styled_missing_pdf = df_missing_perf_results_primary[['branch', 'done rate', 'missing rate', '_done_rate_numeric']].copy()
-                    df_for_pdf_table_render = df_missing_perf_results_primary # For record count
-                    def get_color_for_pdf_local(val): # Simplified get_color
-                        if val == 100.0: return ('#2ca02c', 'white'); else: return ('#FF6347', 'white') 
+                    df_for_pdf_table_render = df_missing_perf_results_primary 
+                    def get_color_for_pdf_local(val):
+                        if val == 100.0: return ('#2ca02c', 'white')
+                        # Corrected the SyntaxError here:
+                        elif val >= 99.0: return ('#90EE90', 'black')
+                        elif val >= 98.0: return ('#ADFF2F', 'black');
+                        elif val >= 96.0: return ('#FFFF99', 'black')
+                        elif val >= 93.0: return ('#FFD700', 'black');
+                        elif val >= 90.0: return ('#FFA500', 'black')
+                        elif val >= 85.0: return ('#FF7F50', 'white');
+                        else: return ('#FF6347', 'white')
                     def style_row_for_pdf_local(row_series):
                         bg_color_l, text_color_l = get_color_for_pdf_local(row_series['_done_rate_numeric'])
                         return pd.Series({'done rate': f'background-color: {bg_color_l}; color: {text_color_l}; text-align: right;',
@@ -1619,33 +1588,34 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
 
                 elif is_primary_data_purely_complaint_closure_check:
                     pdf_table_title_suffix = f"{CLOSURE_REPORT_TYPE_NAME} Data"
-                    df_for_pdf_table_render = df_pdf_base_table.rename(columns={'issues':'Status'}) # For record count
+                    df_for_pdf_table_render = df_pdf_base_table.rename(columns={'issues':'Status'}) 
                     html_table_content_for_pdf = f"<h2>Summary by Managers</h2>"
                     if df_closure_managers_summary_primary is not None:
                         _, manager_disp_df_pdf = _prepare_closure_summary_df(df_pdf_base_table.rename(columns={'issues':'Status'}), 'area_manager')
                         manager_disp_df_pdf['نسبة الاكتمال (%)'] = manager_disp_df_pdf['نسبة الاكتمال (%)'].apply(lambda x: f"{x:.1f}%")
                         html_table_content_for_pdf += manager_disp_df_pdf.reset_index().to_html(index=False, classes="dataframe", border=0)
-                    # ... (similar for branches and low completion) ...
+                    else: html_table_content_for_pdf += "<p>No manager summary data.</p>"
+                    
+                    html_table_content_for_pdf += f"<h2>Summary by Branches</h2>"
+                    if df_closure_branches_summary_primary is not None:
+                        _, branch_disp_df_pdf = _prepare_closure_summary_df(df_pdf_base_table.rename(columns={'issues':'Status'}), 'branch')
+                        branch_disp_df_pdf['نسبة الاكتمال (%)'] = branch_disp_df_pdf['نسبة الاكتمال (%)'].apply(lambda x: f"{x:.1f}%")
+                        html_table_content_for_pdf += branch_disp_df_pdf.sort_values("المجموع", ascending=False).reset_index().to_html(index=False, classes="dataframe", border=0)
+                    else: html_table_content_for_pdf += "<p>No branch summary data.</p>"
+
+                    if 'closure_low_completion_table_df' in figs_complaint_closure_primary:
+                        low_comp_df_pdf_raw = figs_complaint_closure_primary['closure_low_completion_table_df']
+                        df_low_comp_data_filtered_pdf = df_pdf_base_table[df_pdf_base_table['branch'].isin(low_comp_df_pdf_raw.index)].rename(columns={'issues':'Status'})
+                        _, df_low_comp_display_pdf = _prepare_closure_summary_df(df_low_comp_data_filtered_pdf, 'branch')
+                        df_low_comp_display_pdf['نسبة الاكتمال (%)'] = df_low_comp_display_pdf['نسبة الاكتمال (%)'].apply(lambda x: f"{x:.1f}%")
+                        df_low_comp_display_pdf.index.name = "الفرع"
+                        html_table_content_for_pdf += f"<h2>Branches with &lt; 50% Completion</h2>"
+                        html_table_content_for_pdf += df_low_comp_display_pdf.reset_index().to_html(index=False, classes="dataframe", border=0)
                 
-                else: # General data table for PDF
+                else: 
                     pdf_table_title_suffix = "General Data (Filtered)"
-                    df_pdf_general_filtered_for_table = df_pdf_base_table.copy()
-                    if not df_pdf_general_filtered_for_table.empty:
-                        df_pdf_general_filtered_for_table['temp_report_type_lower_pdf'] = df_pdf_general_filtered_for_table['report_type'].astype(str).str.strip().str.lower()
-                        df_pdf_general_filtered_for_table['temp_upload_category_lower_pdf'] = df_pdf_general_filtered_for_table['upload_category'].astype(str).str.strip().str.lower()
-                        closure_report_type_name_lower_pdf = CLOSURE_REPORT_TYPE_NAME.strip().lower()
-
-                        condition_closure_pdf = (df_pdf_general_filtered_for_table['temp_report_type_lower_pdf'] == closure_report_type_name_lower_pdf)
-                        condition_complaints_perf_pdf = (
-                            (df_pdf_general_filtered_for_table['temp_upload_category_lower_pdf'] == 'complaints') &
-                            (df_pdf_general_filtered_for_table['temp_report_type_lower_pdf'] == 'performance')
-                        )
-                        df_for_pdf_table_render = df_pdf_general_filtered_for_table[~(condition_closure_pdf | condition_complaints_perf_pdf)]
-                        df_for_pdf_table_render = df_for_pdf_table_render.drop(columns=['temp_report_type_lower_pdf', 'temp_upload_category_lower_pdf'], errors='ignore')
-                    else:
-                        df_for_pdf_table_render = pd.DataFrame(columns=df_pdf_base_table.columns)
-
-
+                    df_for_pdf_table_render = df_general_filtered_main_view.copy() # Use the general filtered data
+                    
                     if 'shift' in df_for_pdf_table_render.columns and df_for_pdf_table_render['shift'].notna().any(): pdf_table_cols_display.append('shift')
                     if 'upload_category' in df_for_pdf_table_render.columns and 'report_type' in df_for_pdf_table_render.columns:
                         cond_pdf_table = (df_for_pdf_table_render['report_type'].astype(str).str.lower()=='issues') & (df_for_pdf_table_render['upload_category'].astype(str).str.lower()=='cctv')
@@ -1657,14 +1627,23 @@ if 'df_primary_period' in locals() and not df_primary_period.empty:
                         df_pdf_to_render_final_html['date'] = df_pdf_to_render_final_html['date'].dt.strftime('%Y-%m-%d')
                     html_table_content_for_pdf = df_pdf_to_render_final_html.to_html(index=False, classes="dataframe", border=0)
 
-                # --- Construct full HTML for PDF ---
                 html_full_for_table_pdf = f"<head><meta charset='utf-8'><title>Data Table Report</title><style>body{{font-family:Arial,sans-serif;margin:20px}}h1,h2{{text-align:center;color:#333;page-break-after:avoid}}table{{border-collapse:collapse;width:100%;margin-top:15px;font-size:0.8em;page-break-inside:auto}}tr{{page-break-inside:avoid;page-break-after:auto}}th,td{{border:1px solid #ddd;padding:6px;text-align:left;word-wrap:break-word}}th{{background-color:#f2f2f2}}.dataframe tbody tr:nth-of-type(even){{background-color:#f9f9f9}}@media print{{*{{-webkit-print-color-adjust:exact !important;color-adjust:exact !important;print-color-adjust:exact !important}}body{{background-color:white !important}}}}ul{{list-style-type:disc;padding-left:20px}}</style></head><body>"
                 html_full_for_table_pdf += f"<h1>{pdf_table_title_suffix} Report</h1><h2>Primary Period: {primary_date_range[0]:%Y-%m-%d} to {primary_date_range[1]:%Y-%m-%d}</h2>"
 
                 record_count_text = f"<p><strong>Total Records in Table:</strong> {len(df_for_pdf_table_render)}</p>"
                 if is_primary_data_purely_missing_check and not df_missing_perf_results_primary.empty:
                     record_count_text = f"<p><strong>Branch Count in Summary:</strong> {len(df_missing_perf_results_primary)}</p>"
-                # (Add similar specific counts for pure closure if needed, using df_for_pdf_table_render)
+                elif is_primary_data_purely_complaint_closure_check:
+                    closure_summary_df_for_pdf = figs_complaint_closure_primary.get('closure_overall_summary_df')
+                    if closure_summary_df_for_pdf is not None and not closure_summary_df_for_pdf.empty:
+                        total_records_closure = closure_summary_df_for_pdf['count'].sum()
+                        record_count_text = f"<p><strong>Total Records in Closure Summary:</strong> {int(total_records_closure)}</p>" # Cast to int
+                        record_count_text += "<ul>"
+                        for status_pdf, row_pdf in closure_summary_df_for_pdf.iterrows():
+                            percentage_pdf = (row_pdf['count'] / total_records_closure * 100) if total_records_closure > 0 else 0
+                            record_count_text += f"<li>{status_pdf}: {int(row_pdf['count'])} ({percentage_pdf:.1f}%)</li>" # Cast to int
+                        record_count_text += "</ul>"
+
 
                 html_full_for_table_pdf += record_count_text
                 html_full_for_table_pdf += html_table_content_for_pdf + "</body></html>"
